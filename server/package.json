@@ -1,0 +1,23 @@
+{
+  "name": "territorios",
+  "version": "1.0.0",
+  "description": "Gerenciador de territórios para congregações.",
+  "keywords": [
+    "territorio"
+  ],
+  "homepage": "https://github.com/jonathanlbt1/territorios#readme",
+  "bugs": {
+    "url": "https://github.com/jonathanlbt1/territorios/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonathanlbt1/territorios.git"
+  },
+  "license": "ISC",
+  "author": "Jonathan Moraes",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
