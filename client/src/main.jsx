@@ -1,10 +1,22 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
+import React from 'react'
+import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
+import './index.css'
+import { registerSW } from 'virtual:pwa-register'
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+// Register PWA Service Worker with auto-refresh on new version
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    // Force apply the new service worker and reload the app
+    updateSW()
+  },
+  onRegistered() {
+    // No-op, but ensures registration happens early
+  },
+})
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <App />
 )
+

@@ -1,23 +1,33 @@
 {
-  "name": "territorios",
+  "name": "territorios-server",
   "version": "1.0.0",
-  "description": "Gerenciador de territórios para congregações.",
-  "keywords": [
-    "territorio"
-  ],
-  "homepage": "https://github.com/jonathanlbt1/territorios#readme",
-  "bugs": {
-    "url": "https://github.com/jonathanlbt1/territorios/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/jonathanlbt1/territorios.git"
-  },
-  "license": "ISC",
-  "author": "Jonathan Moraes",
-  "type": "commonjs",
-  "main": "index.js",
+  "description": "API Server for Territórios - Territory Management System",
+  "main": "src/index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "migrate": "node src/db/migrate.js",
+    "seed": "node src/db/seed.js",
+    "generate-vapid": "node src/utils/generateVapidKeys.js",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
+    "test:coverage": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.11.3",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^7.2.2"
   }
 }

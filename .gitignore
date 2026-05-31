@@ -37,3 +37,14 @@ coverage/
 # Misc
 *.pem
 .cache/
+
+# Scripts SQL temporários
+generate_users_sql.js
+insert_territories.sql
+insert_users.sql
+insert_territory_history.sql
+
+DEPLOY.md
+client/.env.example
+server/.env.example
+form-example.html

@@ -1,68 +1,306 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+* {
+  -webkit-tap-highlight-color: transparent;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+html, body {
+  overscroll-behavior: none;
 }
 
 body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+  @apply bg-gradient-to-br from-slate-50 via-white to-primary-50 min-h-screen text-slate-800;
+  @apply dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-slate-100;
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+::-webkit-scrollbar-track {
+  @apply bg-slate-100 dark:bg-slate-800 rounded;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 dark:bg-slate-600 rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400 dark:bg-slate-500;
+}
+
+/* Mobile-friendly touch scrolling */
+.scroll-container {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Glass morphism effect */
+.glass {
+  @apply bg-white/80 backdrop-blur-xl dark:bg-slate-900/80;
+}
+
+/* Animation classes */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
-  a:hover {
-    color: #747bff;
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
-  button {
-    background-color: #f9f9f9;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: rgba(12, 135, 242, 0.3); }
+  50% { border-color: rgba(12, 135, 242, 0.8); }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-pulse-border {
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+/* Status badges */
+.status-badge {
+  @apply px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide;
+}
+
+.status-pending {
+  @apply bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300;
+}
+
+.status-in_progress {
+  @apply bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300;
+}
+
+.status-returned {
+  @apply bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300;
+}
+
+.status-completed {
+  @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300;
+}
+
+.status-cancelled {
+  @apply bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400;
+}
+
+/* Result badges */
+.result-complete {
+  @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300;
+}
+
+.result-partial {
+  @apply bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300;
+}
+
+.result-not_done {
+  @apply bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300;
+}
+
+/* Card styling */
+.card {
+  @apply bg-white rounded-2xl shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden;
+  @apply dark:bg-slate-800 dark:shadow-slate-900/50 dark:border-slate-700;
+}
+
+.card-header {
+  @apply px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white;
+  @apply dark:border-slate-700 dark:from-slate-800 dark:to-slate-800;
+}
+
+.card-body {
+  @apply p-5;
+}
+
+/* Button styles */
+.btn {
+  @apply px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 active:scale-95;
+}
+
+.btn-primary {
+  @apply bg-primary-600 text-white hover:bg-primary-700 shadow-lg shadow-primary-500/25;
+  @apply dark:bg-primary-500 dark:hover:bg-primary-600;
+}
+
+.btn-secondary {
+  @apply bg-slate-100 text-slate-700 hover:bg-slate-200;
+  @apply dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600;
+}
+
+.btn-success {
+  @apply bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-500/25;
+  @apply dark:bg-emerald-500 dark:hover:bg-emerald-600;
+}
+
+.btn-warning {
+  @apply bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/25;
+  @apply dark:bg-amber-600 dark:hover:bg-amber-700;
+}
+
+.btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700 shadow-lg shadow-red-500/25;
+  @apply dark:bg-red-500 dark:hover:bg-red-600;
+}
+
+/* Input styles */
+.input {
+  @apply w-full px-4 py-3 rounded-xl border border-slate-200 bg-white focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all duration-200;
+  @apply dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-primary-500 dark:focus:ring-primary-900/50 dark:placeholder-slate-400;
+}
+
+.input-label {
+  @apply block text-sm font-medium text-slate-700 mb-1.5 dark:text-slate-300;
+}
+
+/* Navigation */
+.nav-item {
+  @apply flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-primary-50 hover:text-primary-700 transition-all duration-200;
+  @apply dark:text-slate-300 dark:hover:bg-primary-900/30 dark:hover:text-primary-400;
+}
+
+.nav-item.active {
+  @apply bg-primary-600 text-white shadow-lg shadow-primary-500/30;
+  @apply dark:bg-primary-600 dark:text-white;
+}
+
+/* Mobile bottom navigation */
+.mobile-nav {
+  @apply fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 px-2 pb-safe;
+  @apply dark:bg-slate-900/90 dark:border-slate-700;
+}
+
+.mobile-nav-item {
+  @apply flex flex-col items-center gap-1 py-2 px-3 rounded-xl text-slate-500 transition-all duration-200;
+  @apply dark:text-slate-400;
+}
+
+.mobile-nav-item.active {
+  @apply text-primary-600 bg-primary-50;
+  @apply dark:text-primary-400 dark:bg-primary-900/30;
+}
+
+/* Territory card */
+.territory-card {
+  @apply card p-4 hover:shadow-xl transition-shadow duration-300 cursor-pointer;
+}
+
+.territory-number {
+  @apply w-12 h-12 rounded-xl bg-primary-600 text-white flex items-center justify-center font-bold text-lg shadow-lg shadow-primary-500/30;
+  @apply dark:bg-primary-500 dark:shadow-primary-600/30;
+}
+
+/* Map viewer */
+.map-container {
+  @apply relative w-full bg-slate-900 rounded-xl overflow-hidden;
+  touch-action: none;
+}
+
+/* Checkbox custom */
+.checkbox-custom {
+  @apply w-6 h-6 rounded-lg border-2 border-slate-300 flex items-center justify-center transition-all duration-200 cursor-pointer;
+  @apply dark:border-slate-600;
+}
+
+.checkbox-custom.checked {
+  @apply bg-primary-600 border-primary-600;
+  @apply dark:bg-primary-500 dark:border-primary-500;
+}
+
+/* Toast notifications */
+.toast {
+  @apply fixed bottom-20 left-4 right-4 p-4 rounded-xl shadow-2xl animate-slide-in z-50;
+}
+
+.toast-success {
+  @apply bg-emerald-600 text-white;
+}
+
+.toast-error {
+  @apply bg-red-600 text-white;
+}
+
+.toast-info {
+  @apply bg-primary-600 text-white;
+}
+
+/* Safe area padding for mobile */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
   }
+  
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Loading spinner */
+.spinner {
+  @apply w-6 h-6 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin;
+  @apply dark:border-primary-800 dark:border-t-primary-400;
+}
+
+/* Empty state */
+.empty-state {
+  @apply flex flex-col items-center justify-center py-12 text-center;
+}
+
+.empty-state-icon {
+  @apply w-16 h-16 text-slate-300 mb-4 dark:text-slate-600;
+}
+
+.empty-state-title {
+  @apply text-lg font-semibold text-slate-600 mb-2 dark:text-slate-400;
+}
+
+.empty-state-description {
+  @apply text-slate-400 text-sm max-w-xs dark:text-slate-500;
+}
+
+/* Theme transition */
+.theme-transition {
+  @apply transition-colors duration-300;
+}
+
+/* Dark mode specific utilities */
+.dark .text-slate-800 {
+  @apply text-slate-100;
+}
+
+/* Table dark mode */
+.dark table thead {
+  @apply bg-slate-800;
+}
+
+.dark table tbody tr:hover {
+  @apply bg-slate-700/50;
+}
+
+/* Select dark mode */
+select {
+  @apply dark:bg-slate-800 dark:text-white;
+}
+
+select option {
+  @apply dark:bg-slate-800 dark:text-white;
 }
