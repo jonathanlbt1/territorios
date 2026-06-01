@@ -1,20 +1,40 @@
-# Territorios
+# Territórios
 
-Territory management platform for congregation workflows, built with React + Vite on the frontend and Node.js + Express + PostgreSQL on the backend.
+Territories management platform for congregation workflows, built with React + Vite on the frontend and Node.js + Express + PostgreSQL on the backend. The project covers the full operational flow: login, dashboards, assignments, territory tracking, reports, push notifications, and PWA support.
 
-## Overview
+## Highlights
 
-The application supports:
+- Authentication with role-based access control
 - Territory registration and map management
-- Assignment lifecycle (pending, in progress, returned, completed)
-- Admin and dirigente roles
-- Dashboards and reports (including S-13 PDF)
-- Push notifications
-- PWA client behavior
+- Assignment lifecycle: pending, in progress, returned, completed, and cancelled
+- Administrative dashboards and operational reports
+- S-13 report generation
+- Web Push notifications
+- Responsive UI with light and dark themes
+- PWA-ready client experience
+
+## Screenshots
+
+### Login screen
+
+![Login screen](./img/image_1.png)
+
+### Dashboard
+
+![Dashboard](./img/image_2.png)
+
+### Mobile navigation
+
+![Mobile navigation](./img/image_3.png)
+
+### Mobile menu in light theme
+
+![Mobile menu in light theme](./img/image_4.png)
 
 ## Tech Stack
 
 ### Client
+
 - React 18
 - Vite 5
 - Tailwind CSS
@@ -24,6 +44,7 @@ The application supports:
 - Vitest + Testing Library
 
 ### Server
+
 - Node.js (ESM)
 - Express
 - PostgreSQL (`pg`)
@@ -32,31 +53,33 @@ The application supports:
 - Jest + Supertest
 - Web Push (`web-push`)
 
-## Repository Structure
+## Project Structure
 
 ```text
 .
 ├── client/                 # React app (Vite)
 ├── server/                 # Express API
+├── img/                    # README screenshots
 ├── docker-compose.yaml     # Full stack local containers
 ├── GUIA_CONSTRUCAO.md      # Long-form build guide
 └── formulario.html         # Static S-13 helper/form file
 ```
 
-## Prerequisites
+## Requirements
 
 - Node.js 18+
 - npm 9+
-- PostgreSQL 14+ (or compatible)
-- Docker + Docker Compose (optional, for containerized run)
+- PostgreSQL 17+ or compatible
+- Docker + Docker Compose optional, for local containerized run
 
 ## Environment Variables
 
 ### Server
 
-The server reads env vars from process environment (`dotenv` is enabled).
+The server reads environment variables through `dotenv`.
 
 Required in most setups:
+
 - `DB_HOST`
 - `DB_PORT`
 - `DB_NAME`
@@ -68,92 +91,87 @@ Required in most setups:
 - `VAPID_PRIVATE_KEY`
 
 Optional:
+
 - `PORT` (default: `3001`)
 - `DATABASE_URL` (if set, used instead of discrete DB vars)
 - `DB_SSL=true` (or `PGSSLMODE=require` / `SSLMODE=require`)
 - `VAPID_SUBJECT`
-- `DEFAULT_RESET_PASSWORD`
+- `DEFAULT_ADMIN_NAME`
+- `DEFAULT_ADMIN_USERNAME`
+- `DEFAULT_ADMIN_PASSWORD`
 
 ### Client
 
 Optional:
+
 - `VITE_API_BASE_URL`
 
 Behavior:
-- If `VITE_API_BASE_URL` is set, client uses it.
-- Otherwise client uses `/api` and relies on Vite proxy (dev) or Nginx proxy (Docker).
 
-## Local Development (without Docker)
+- If `VITE_API_BASE_URL` is set, the client uses it.
+- Otherwise the client uses `/api` and relies on the Vite proxy in development or Nginx proxy in Docker.
 
-## 1) Install dependencies
+## Quick Start
+
+### 1. Install dependencies
 
 ```bash
 cd server && npm install
 cd ../client && npm install
 ```
 
-## 2) Start PostgreSQL
+### 2. Configure the database
 
-Make sure your database is running and accessible using server env vars.
+Make sure PostgreSQL is running and reachable with the server environment variables above.
 
-## 3) Run migrations
+### 3. Run migrations
 
 ```bash
 cd server
 npm run migrate
 ```
 
-## 4) Start backend
+### 4. Start the backend
 
 ```bash
 cd server
 npm run dev
 ```
 
-Server runs at:
-- `http://localhost:3001`
-- Health check: `http://localhost:3001/health`
+The API runs at `http://localhost:3001`.
 
-## 5) Start frontend
+### 5. Start the frontend
 
 ```bash
 cd client
 npm run dev
 ```
 
-Client runs at:
-- `http://localhost:5173`
+The client runs at `http://localhost:5173`.
 
-In development, Vite proxies:
-- `/api` -> `http://localhost:3001`
-- `/maps` -> `http://localhost:3001`
+## Docker Compose
 
-## Docker Compose Run
-
-Start full stack:
+Start the full stack with PostgreSQL included:
 
 ```bash
 docker compose up --build
 ```
 
 Services:
-- Client: `http://localhost` (port 80)
-- Server: `http://localhost:3001`
 
-Stop:
+- Client: `http://localhost` on port `80`
+- Server: `http://localhost:3001`
+- Database: `postgres:17` on port `5432`
+
+Stop everything with:
 
 ```bash
 docker compose down
 ```
 
-Notes:
-- Current compose file uses `host.docker.internal` for database host.
-- On some Linux setups, you may need to replace it with your host IP or an internal DB container.
-- The compose file currently includes real-looking secrets; rotate them for production.
+## Testing
 
-## Test Commands
-
-### Client tests
+### Client
 
 ```bash
 cd client
@@ -161,7 +179,7 @@ npm test
 npm run test:watch
 ```
 
-### Server tests
+### Server
 
 ```bash
 cd server
@@ -170,7 +188,7 @@ npm run test:watch
 npm run test:coverage
 ```
 
-## Build Commands
+## Build
 
 ### Client
 
@@ -190,21 +208,23 @@ npm start
 ## Available Scripts
 
 ### client/package.json
-- `dev` - start Vite dev server
-- `build` - production build
-- `preview` - preview built app
-- `test` - run tests once
-- `test:watch` - watch mode tests
+
+- `dev` - Start Vite dev server
+- `build` - Production build
+- `preview` - Preview built app
+- `test` - Run tests once
+- `test:watch` - Watch mode tests
 
 ### server/package.json
-- `start` - run API with Node
-- `dev` - run API with nodemon
-- `migrate` - run DB migration script
-- `seed` - references `src/db/seed.js` (currently missing in repository)
-- `generate-vapid` - generate push VAPID keys
-- `test` - run Jest suite
-- `test:watch` - run Jest in watch mode
-- `test:coverage` - run Jest with coverage
+
+- `start` - Run API with Node
+- `dev` - Run API with nodemon
+- `migrate` - Run DB migration script
+- `seed` - Seed helpers, when available
+- `generate-vapid` - Generate push VAPID keys
+- `test` - Run Jest suite
+- `test:watch` - Run Jest in watch mode
+- `test:coverage` - Run Jest with coverage
 
 ## API Base Paths
 
@@ -216,22 +236,22 @@ npm start
 - `/api/maps`
 - `/api/push`
 
+## Notes
+
+- The server migration creates the schema and inserts a default admin on first run when no admin exists.
+- PostgreSQL date parsing is customized to reduce timezone drift for date-only fields.
+- The app is designed to work well on desktop and mobile, with a mobile bottom navigation and adaptive drawers.
+
 ## Troubleshooting
 
-- 401 loop on client:
-  - Token may be invalid/expired. The client auto-clears auth data and redirects to login on HTTP 401.
-
-- Date shift issues:
-  - The server customizes PostgreSQL DATE parsing to reduce timezone drift for date-only fields.
-
-- Docker server health check mismatch:
-  - Server Docker image sets `PORT=8080`, while compose overrides to `3001`.
-  - If health checks fail unexpectedly, verify effective `PORT` and check logs.
+- 401 loop on the client: the token may be invalid or expired. The client clears auth data and redirects to login on HTTP 401.
+- Date shift issues: PostgreSQL DATE values are parsed as strings to avoid timezone drift.
+- Docker startup issues: confirm that the `db` service is healthy and that the server is using `DB_HOST=db` in compose.
 
 ## Additional Documentation
 
-- See `GUIA_CONSTRUCAO.md` for a full implementation walkthrough.
+- See [GUIA_CONSTRUCAO.md](./GUIA_CONSTRUCAO.md) for the full implementation walkthrough.
 
 ## Contributing
 
-**Se desejar ajudar com o desenvolvimento deste projeto, sinta-se a vontade para me contatar**
+If you are interested in helping out, please, don't hesitate to reach out!
