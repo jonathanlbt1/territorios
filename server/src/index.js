@@ -14,6 +14,7 @@ import mapsRoutes from './routes/maps.js';
 import pushRoutes from './routes/push.js';
 import { startOverdueNotifier } from './jobs/overdueNotifier.js';
 import migrate from './db/migrate.js';
+import seed from './db/seed.js';
 
 dotenv.config();
 
@@ -48,12 +49,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Start server after running migrations
+// Start server after running migrations and seeding database
 (async () => {
   try {
     await migrate();
+    await seed();
   } catch (err) {
-    console.error('Error running migrations at startup:', err);
+    console.error('Error running migrations or seeding at startup:', err);
   }
 
   app.listen(PORT, '0.0.0.0', () => {

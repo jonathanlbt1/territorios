@@ -58,7 +58,8 @@ export function AuthProvider({ children }) {
     logout,
     loading,
     isAdmin: user?.role === 'admin',
-    isDirigente: user?.role === 'dirigente'
+    isDirigente: user?.role === 'dirigente',
+    isPublisher: user?.role === 'publisher'
   }), [user, login, logout, loading]);
 
   return (

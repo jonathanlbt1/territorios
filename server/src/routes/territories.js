@@ -278,5 +278,88 @@ router.get('/:id/history', authenticateToken, async (req, res) => {
   }
 });
 
+// Get streets and houses for a territory
+router.get('/:id/streets', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT s.id as street_id, s.name as street_name, s.block_number,
+             h.id as house_id, h.number as house_number
+      FROM streets s
+      LEFT JOIN houses h ON h.street_id = s.id
+      WHERE s.territory_id = $1
+      ORDER BY s.block_number, s.name, h.number
+    `, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get streets error:', error);
+    res.status(500).json({ error: 'Erro ao buscar ruas' });
+  }
+});
+
+// Add street to a block in a territory (Admin only)
+router.post('/:id/streets', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, block_number } = req.body;
+    if (!name || !block_number) {
+      return res.status(400).json({ error: 'Nome da rua e número da quadra são obrigatórios' });
+    }
+    const result = await pool.query(`
+      INSERT INTO streets (territory_id, block_number, name)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `, [id, block_number, name]);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Add street error:', error);
+    res.status(500).json({ error: 'Erro ao adicionar rua' });
+  }
+});
+
+// Delete street (Admin only)
+router.delete('/streets/:streetId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { streetId } = req.params;
+    await pool.query('DELETE FROM streets WHERE id = $1', [streetId]);
+    res.json({ message: 'Rua excluída com sucesso' });
+  } catch (error) {
+    console.error('Delete street error:', error);
+    res.status(500).json({ error: 'Erro ao excluir rua' });
+  }
+});
+
+// Add house number to street (Admin only)
+router.post('/streets/:streetId/houses', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { streetId } = req.params;
+    const { number } = req.body;
+    if (!number) {
+      return res.status(400).json({ error: 'Número da casa é obrigatório' });
+    }
+    const result = await pool.query(`
+      INSERT INTO houses (street_id, number)
+      VALUES ($1, $2)
+      RETURNING *
+    `, [streetId, number]);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Add house error:', error);
+    res.status(500).json({ error: 'Erro ao adicionar número da casa' });
+  }
+});
+
+// Delete house number (Admin only)
+router.delete('/streets/houses/:houseId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { houseId } = req.params;
+    await pool.query('DELETE FROM houses WHERE id = $1', [houseId]);
+    res.json({ message: 'Casa excluída com sucesso' });
+  } catch (error) {
+    console.error('Delete house error:', error);
+    res.status(500).json({ error: 'Erro ao excluir casa' });
+  }
+});
+
 export default router;
 

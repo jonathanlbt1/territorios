@@ -17,12 +17,31 @@ const migrate = async () => {
         name VARCHAR(255) NOT NULL,
         username VARCHAR(100) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'dirigente')),
+        role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'dirigente', 'publisher')),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
     console.log('✅ Users table created');
+
+    // Alter users check constraint to allow 'publisher' if it already exists with old roles
+    await client.query(`
+      DO $$
+      DECLARE
+          constraint_name_var text;
+      BEGIN
+          SELECT con.conname INTO constraint_name_var
+          FROM pg_constraint con
+          JOIN pg_class rel ON rel.oid = con.conrelid
+          WHERE rel.relname = 'users' AND con.contype = 'c' AND con.conname LIKE '%role%';
+          
+          IF constraint_name_var IS NOT NULL THEN
+              EXECUTE 'ALTER TABLE users DROP CONSTRAINT ' || constraint_name_var;
+          END IF;
+      END $$;
+      ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'dirigente', 'publisher'));
+    `);
+    console.log('✅ Users role constraint updated');
 
     // Create territories table
     await client.query(`
@@ -62,6 +81,62 @@ const migrate = async () => {
       );
     `);
     console.log('✅ Assignments table created');
+
+    // Create streets table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS streets (
+        id SERIAL PRIMARY KEY,
+        territory_id INTEGER NOT NULL REFERENCES territories(id) ON DELETE CASCADE,
+        block_number INTEGER NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Streets table created');
+
+    // Create houses table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS houses (
+        id SERIAL PRIMARY KEY,
+        street_id INTEGER NOT NULL REFERENCES streets(id) ON DELETE CASCADE,
+        number VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Houses table created');
+
+    // Create publisher_assignments table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS publisher_assignments (
+        id SERIAL PRIMARY KEY,
+        assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+        publisher_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        block_number INTEGER NOT NULL,
+        status VARCHAR(50) DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'returned')),
+        assigned_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        due_date TIMESTAMP NOT NULL,
+        returned_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Publisher assignments table created');
+
+    // Create house_status table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS house_status (
+        id SERIAL PRIMARY KEY,
+        assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+        house_id INTEGER NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+        visited BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (assignment_id, house_id)
+      );
+    `);
+    console.log('✅ House status table created');
 
     // Create notifications table
     await client.query(`
@@ -121,6 +196,11 @@ const migrate = async () => {
       CREATE INDEX IF NOT EXISTS idx_territory_history_territory ON territory_history(territory_id);
       CREATE INDEX IF NOT EXISTS idx_territory_history_date ON territory_history(worked_date);
       CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_streets_territory_block ON streets(territory_id, block_number);
+      CREATE INDEX IF NOT EXISTS idx_houses_street ON houses(street_id);
+      CREATE INDEX IF NOT EXISTS idx_publisher_assignments_assignment ON publisher_assignments(assignment_id);
+      CREATE INDEX IF NOT EXISTS idx_publisher_assignments_publisher ON publisher_assignments(publisher_id);
+      CREATE INDEX IF NOT EXISTS idx_house_status_assignment ON house_status(assignment_id);
     `);
     console.log('✅ Indexes created');
 
@@ -184,7 +264,7 @@ const migrate = async () => {
 export default migrate;
 
 // If run directly (npm run migrate), execute migrations and close the pool.
-if (process.argv[1] && process.argv[1].endsWith('src/db/migrate.js')) {
+if (process.argv[1]?.endsWith('src/db/migrate.js')) {
   migrate()
     .catch((err) => {
       console.error('Migration failed:', err);

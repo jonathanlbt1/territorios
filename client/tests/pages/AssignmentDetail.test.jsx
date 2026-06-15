@@ -54,6 +54,8 @@ vi.mock('lucide-react', () => ({
   AlertCircle: (props) => <svg data-testid="alert-circle-icon" {...props} />,
   XCircle: (props) => <svg data-testid="x-circle-icon" {...props} />,
   FileText: (props) => <svg data-testid="file-text-icon" {...props} />,
+  Plus: (props) => <svg data-testid="plus-icon" {...props} />,
+  Trash2: (props) => <svg data-testid="trash-icon" {...props} />,
 }));
 
 // Mock components

@@ -4,6 +4,54 @@ import { sendPushToUser } from '../services/pushNotification.js';
 export const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
 export const DEFAULT_INTERVAL_MS = 12 * 60 * 60 * 1000; // run twice a day
 
+export async function notifyOverduePublisherAssignments() {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`
+      SELECT pa.id as publisher_assignment_id, pa.assignment_id, pa.publisher_id, pa.block_number,
+             t.territory_code, u.name as publisher_name, a.dirigente_id
+      FROM publisher_assignments pa
+      JOIN assignments a ON a.id = pa.assignment_id
+      JOIN territories t ON t.id = a.territory_id
+      JOIN users u ON u.id = pa.publisher_id
+      WHERE pa.status = 'in_progress'
+        AND pa.due_date <= CURRENT_TIMESTAMP
+        AND NOT EXISTS (
+          SELECT 1 FROM notifications n
+          WHERE n.user_id = pa.publisher_id
+            AND n.type = 'pub_overdue_' || pa.id
+        )
+    `);
+
+    for (const row of result.rows) {
+      const { publisher_assignment_id, assignment_id, publisher_id, block_number, territory_code } = row;
+      const pubNotifMessage = `Você está com a quadra ${block_number} do território ${territory_code} há mais de 24 horas. Por favor, devolva o cartão ao dirigente.`;
+      
+      // Notify publisher
+      await client.query(`
+        INSERT INTO notifications (user_id, type, title, message, assignment_id)
+        VALUES ($1, $2, 'Quadra Atrasada', $3, $4)
+      `, [
+        publisher_id,
+        `pub_overdue_${publisher_assignment_id}`,
+        pubNotifMessage,
+        assignment_id
+      ]);
+
+      // Send push notification to publisher
+      sendPushToUser(publisher_id, {
+        title: '⏰ Quadra Atrasada',
+        body: pubNotifMessage,
+        data: { assignmentId: assignment_id, url: '/publisher' }
+      }).catch(err => console.error('Push notification error:', err));
+    }
+  } catch (error) {
+    console.error('Overdue publisher assignments notifier error:', error);
+  } finally {
+    client.release();
+  }
+}
+
 export async function notifyOverdueAssignments() {
   const client = await pool.connect();
 
@@ -65,6 +113,9 @@ export async function notifyOverdueAssignments() {
         }).catch(err => console.error('Push notification error:', err));
       }
     }
+
+    // Call publisher overdue checks
+    await notifyOverduePublisherAssignments();
   } catch (error) {
     console.error('Overdue notifier error:', error);
   } finally {

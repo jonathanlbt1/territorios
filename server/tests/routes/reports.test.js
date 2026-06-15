@@ -958,6 +958,75 @@ describe('Reports Routes', () => {
     });
   });
 
+  describe('GET /reports/house-activity', () => {
+    it('should require territory_id', async () => {
+      const response = await request(app).get('/reports/house-activity');
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Território é obrigatório');
+    });
+
+    it('should return 404 if territory does not exist', async () => {
+      mockPool.query.mockResolvedValueOnce({ rows: [] }); // territory lookup returns empty
+
+      const response = await request(app).get('/reports/house-activity?territory_id=999');
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('Território não encontrado');
+    });
+
+    it('should return 200 with data if territory exists', async () => {
+      const mockTerritory = { id: 1, territory_number: 1, locality: 'Mogi Moderno', block_count: 6 };
+      const mockTimesWorked = { count: '3' };
+      const mockHouses = [
+        { house_id: 1, house_number: '120', street_id: 1, street_name: 'Rua Um', block_number: 1, visit_count: 2 }
+      ];
+
+      mockPool.query
+        .mockResolvedValueOnce({ rows: [mockTerritory] }) // territory lookup
+        .mockResolvedValueOnce({ rows: [mockTimesWorked] }) // times worked
+        .mockResolvedValueOnce({ rows: mockHouses }); // houses
+
+      const response = await request(app).get('/reports/house-activity?territory_id=1');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        territory: mockTerritory,
+        times_worked: 3,
+        houses: mockHouses
+      });
+    });
+
+    it('should filter by start_date and end_date', async () => {
+      const mockTerritory = { id: 1, territory_number: 1, locality: 'Mogi Moderno', block_count: 6 };
+      mockPool.query
+        .mockResolvedValueOnce({ rows: [mockTerritory] }) // territory lookup
+        .mockResolvedValueOnce({ rows: [{ count: '1' }] }) // times worked
+        .mockResolvedValueOnce({ rows: [] }); // houses
+
+      await request(app).get('/reports/house-activity?territory_id=1&start_date=2024-01-01&end_date=2024-12-31');
+
+      // Verify second query (times worked count) got start_date and end_date
+      expect(mockPool.query).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('th.worked_date >= $2 AND th.worked_date <= $3'),
+        ['1', '2024-01-01', '2024-12-31']
+      );
+
+      // Verify third query (houses count) got start_date and end_date
+      expect(mockPool.query).toHaveBeenNthCalledWith(
+        3,
+        expect.stringContaining('a.validated_at >= $2 AND a.validated_at <= $3'),
+        ['1', '2024-01-01', '2024-12-31']
+      );
+    });
+
+    it('should return 500 on database error', async () => {
+      mockPool.query.mockRejectedValue(new Error('DB error'));
+
+      const response = await request(app).get('/reports/house-activity?territory_id=1');
+      expect(response.status).toBe(500);
+      expect(response.body.error).toBe('Erro ao gerar relatório de atividade de casas');
+    });
+  });
+
   describe('Security', () => {
     it('should use parameterized queries for coverage', async () => {
       mockPool.query.mockResolvedValue({ rows: [] });
@@ -1040,6 +1109,14 @@ describe('Reports Routes', () => {
       
       const response = await request(app).get('/reports/territory-history-s13');
       expect(response.body.error).toMatch(/Erro|histórico|territórios/i);
+    });
+
+    it('should return Portuguese error for house-activity report', async () => {
+      mockPool.query.mockReset();
+      mockPool.query.mockRejectedValueOnce(new Error('DB error'));
+      
+      const response = await request(app).get('/reports/house-activity?territory_id=1');
+      expect(response.body.error).toMatch(/Erro|relatório|atividade|casas/i);
     });
   });
 });

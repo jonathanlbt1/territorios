@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 
 // Mock client for transactions
 const mockClient = {
-  query: jest.fn(),
+  query: jest.fn().mockResolvedValue({ rows: [] }),
   release: jest.fn(),
 };
 
@@ -56,6 +56,7 @@ describe('Assignments Routes', () => {
     
     // Reset client mock
     mockClient.query.mockReset();
+    mockClient.query.mockResolvedValue({ rows: [] });
     mockClient.release.mockReset();
     mockPool.connect.mockResolvedValue(mockClient);
   });
