@@ -984,4 +984,98 @@ describe('Territories Routes', () => {
       );
     }, 15000);
   });
+
+  describe('House Configuration Endpoints', () => {
+    describe('POST /territories/streets/:streetId/houses', () => {
+      it('should add a house successfully', async () => {
+        mockPool.query
+          .mockResolvedValueOnce({ rows: [] }) // duplicate check
+          .mockResolvedValueOnce({ rows: [{ id: 10, street_id: 5, number: '120', dont_visit: false }] }); // insert
+
+        const response = await request(app)
+          .post('/territories/streets/5/houses')
+          .send({ number: '120', dont_visit: false });
+
+        expect(response.status).toBe(201);
+        expect(response.body.number).toBe('120');
+      });
+
+      it('should fail if house number already exists (case-insensitive)', async () => {
+        mockPool.query.mockResolvedValueOnce({ rows: [{ id: 10 }] }); // duplicate check returns existing row
+
+        const response = await request(app)
+          .post('/territories/streets/5/houses')
+          .send({ number: ' 120 ' });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('já está cadastrado nesta rua');
+      });
+    });
+
+    describe('PUT /territories/streets/:streetId', () => {
+      it('should update street details successfully', async () => {
+        mockPool.query.mockResolvedValueOnce({ rows: [{ id: 5, name: 'Rua Nova', block_number: 2, observations: 'Novas Obs' }] }); // update
+
+        const response = await request(app)
+          .put('/territories/streets/5')
+          .send({ name: 'Rua Nova', block_number: 2, observations: 'Novas Obs' });
+
+        expect(response.status).toBe(200);
+        expect(response.body.name).toBe('Rua Nova');
+        expect(response.body.block_number).toBe(2);
+      });
+
+      it('should return 404 if street not found', async () => {
+        mockPool.query.mockResolvedValueOnce({ rows: [] }); // update returns nothing
+
+        const response = await request(app)
+          .put('/territories/streets/999')
+          .send({ name: 'Rua Nova' });
+
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('Rua não encontrada');
+      });
+    });
+
+    describe('PUT /territories/streets/houses/:houseId', () => {
+      it('should update house successfully', async () => {
+        mockPool.query
+          .mockResolvedValueOnce({ rows: [{ street_id: 5 }] }) // select street_id
+          .mockResolvedValueOnce({ rows: [] }) // check duplicate
+          .mockResolvedValueOnce({ rows: [{ id: 10, number: '120F', dont_visit: true }] }); // update
+
+        const response = await request(app)
+          .put('/territories/streets/houses/10')
+          .send({ number: '120F', dont_visit: true });
+
+        expect(response.status).toBe(200);
+        expect(response.body.dont_visit).toBe(true);
+        expect(response.body.number).toBe('120F');
+      });
+
+      it('should fail if house number already exists on update', async () => {
+        mockPool.query
+          .mockResolvedValueOnce({ rows: [{ street_id: 5 }] }) // select street_id
+          .mockResolvedValueOnce({ rows: [{ id: 11 }] }); // check duplicate returns existing row
+
+        const response = await request(app)
+          .put('/territories/streets/houses/10')
+          .send({ number: '120F' });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('já está cadastrado nesta rua');
+      });
+
+      it('should return 404 if house not found on update number', async () => {
+        mockPool.query.mockResolvedValueOnce({ rows: [] }); // select street_id returns nothing
+
+        const response = await request(app)
+          .put('/territories/streets/houses/999')
+          .send({ number: '120F' });
+
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('Casa não encontrada');
+      });
+    });
+  });
 });

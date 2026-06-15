@@ -22,7 +22,8 @@ import {
   XCircle,
   FileText,
   Plus,
-  Trash2
+  Trash2,
+  Edit2
 } from 'lucide-react';
 import { format, parseISO, isPast, addDays, isValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -256,11 +257,22 @@ function AssignmentDetail() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedBlockForAssign, setSelectedBlockForAssign] = useState(null);
   const [selectedPublisherId, setSelectedPublisherId] = useState('');
+  const [selectedStreetIds, setSelectedStreetIds] = useState([]);
   const [showManageStreetsModal, setShowManageStreetsModal] = useState(false);
   const [newStreetName, setNewStreetName] = useState('');
   const [newStreetBlock, setNewStreetBlock] = useState(1);
   const [newHouseNumber, setNewHouseNumber] = useState('');
   const [selectedStreetForHouse, setSelectedStreetForHouse] = useState('');
+  const [newHouseDontVisit, setNewHouseDontVisit] = useState(false);
+  const [newStreetObservations, setNewStreetObservations] = useState('');
+  const [editingStreetId, setEditingStreetId] = useState(null);
+  const [editingText, setEditingText] = useState('');
+  const [editingStreetIdForFields, setEditingStreetIdForFields] = useState(null);
+  const [editStreetName, setEditStreetName] = useState('');
+  const [editStreetBlock, setEditStreetBlock] = useState(1);
+  const [editStreetObs, setEditStreetObs] = useState('');
+  const [editingHouseId, setEditingHouseId] = useState(null);
+  const [editHouseNumber, setEditHouseNumber] = useState('');
 
   useEffect(() => {
     fetchAssignment();
@@ -329,9 +341,42 @@ function AssignmentDetail() {
     }
   };
 
+  const getUniqueStreetsForSelectedBlock = () => {
+    const blockHouses = streets.filter(h => h.block_number === selectedBlockForAssign);
+    const unique = [];
+    const seen = new Set();
+    for (const h of blockHouses) {
+      if (!seen.has(h.street_id)) {
+        seen.add(h.street_id);
+        unique.push({ street_id: h.street_id, street_name: h.street_name });
+      }
+    }
+    return unique;
+  };
+
   const openAssignModal = async (blockNum) => {
     setSelectedBlockForAssign(blockNum);
     setSelectedPublisherId('');
+    
+    // Find block's streets and pre-select available/unassigned ones
+    const blockHouses = streets.filter(h => h.block_number === blockNum);
+    const blockDetail = blockDetails.find(b => b.block_number === blockNum);
+    const activeAssigns = blockDetail?.publisher_assignments?.filter(pa => pa.status === 'in_progress') || [];
+    const assignedIds = new Set(activeAssigns.flatMap(pa => pa.street_ids || []));
+    
+    const uniqueStreets = [];
+    const seen = new Set();
+    for (const h of blockHouses) {
+      if (!seen.has(h.street_id)) {
+        seen.add(h.street_id);
+        uniqueStreets.push(h.street_id);
+      }
+    }
+    
+    // Select all streets that are NOT assigned/in progress
+    const availableStreets = uniqueStreets.filter(id => !assignedIds.has(id));
+    setSelectedStreetIds(availableStreets);
+
     setShowAssignModal(true);
     try {
       const res = await api.get('/users/publishers');
@@ -347,11 +392,16 @@ function AssignmentDetail() {
       toast.error('Selecione um publicador');
       return;
     }
+    if (selectedStreetIds.length === 0) {
+      toast.error('Selecione pelo menos uma rua');
+      return;
+    }
     setSubmitting(true);
     try {
       await api.post(`/assignments/${id}/publisher-assignments`, {
         block_number: selectedBlockForAssign,
-        publisher_id: selectedPublisherId
+        publisher_id: selectedPublisherId,
+        street_ids: selectedStreetIds
       });
       toast.success(`Quadra ${selectedBlockForAssign} designada com sucesso!`);
       setShowAssignModal(false);
@@ -366,16 +416,41 @@ function AssignmentDetail() {
     }
   };
 
+  const startEditing = (streetId, currentText) => {
+    setEditingStreetId(streetId);
+    setEditingText(currentText || '');
+  };
+
+  const handleSaveObservations = async (streetId) => {
+    try {
+      await api.put(`/assignments/streets/${streetId}/observations`, {
+        observations: editingText
+      });
+      toast.success('Observações atualizadas com sucesso!');
+      setEditingStreetId(null);
+      
+      // Refresh houses and details
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar observações');
+    }
+  };
+
   const handleAddStreet = async (e) => {
     e.preventDefault();
     if (!newStreetName.trim() || !newStreetBlock) return;
     try {
       await api.post(`/territories/${assignment.territory_id}/streets`, {
         name: newStreetName,
-        block_number: newStreetBlock
+        block_number: newStreetBlock,
+        observations: newStreetObservations
       });
       toast.success('Rua adicionada com sucesso!');
       setNewStreetName('');
+      setNewStreetObservations('');
       
       // Refresh streets and block details
       const housesRes = await api.get(`/assignments/${id}/houses`);
@@ -408,18 +483,37 @@ function AssignmentDetail() {
     if (!newHouseNumber.trim() || !selectedStreetForHouse) return;
     try {
       await api.post(`/territories/streets/${selectedStreetForHouse}/houses`, {
-        number: newHouseNumber
+        number: newHouseNumber,
+        dont_visit: newHouseDontVisit
       });
       toast.success('Casa adicionada com sucesso!');
       setNewHouseNumber('');
+      setNewHouseDontVisit(false);
       
       // Refresh streets and block details
       const housesRes = await api.get(`/assignments/${id}/houses`);
       setStreets(housesRes.data);
       const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
       setBlockDetails(blockDetailsRes.data);
-    } catch {
-      toast.error('Erro ao adicionar casa');
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao adicionar casa');
+    }
+  };
+
+  const handleToggleDontVisit = async (houseId, currentDontVisit) => {
+    try {
+      await api.put(`/territories/streets/houses/${houseId}`, {
+        dont_visit: !currentDontVisit
+      });
+      toast.success('Status da casa atualizado com sucesso!');
+      
+      // Refresh streets and block details
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch (error) {
+      toast.error('Erro ao atualizar status da casa');
     }
   };
 
@@ -436,6 +530,54 @@ function AssignmentDetail() {
       setBlockDetails(blockDetailsRes.data);
     } catch {
       toast.error('Erro ao excluir casa');
+    }
+  };
+
+  const startEditingStreetFields = (street) => {
+    setEditingStreetIdForFields(street.id);
+    setEditStreetName(street.name);
+    setEditStreetBlock(street.block);
+    setEditStreetObs(street.observations || '');
+  };
+
+  const handleSaveStreetFields = async (streetId) => {
+    if (!editStreetName.trim() || !editStreetBlock) return;
+    try {
+      await api.put(`/territories/streets/${streetId}`, {
+        name: editStreetName,
+        block_number: editStreetBlock,
+        observations: editStreetObs
+      });
+      toast.success('Rua atualizada com sucesso!');
+      setEditingStreetIdForFields(null);
+      // Refresh streets and block details
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar rua');
+    }
+  };
+
+  const handleSaveHouseNumber = async (houseId) => {
+    if (!editHouseNumber.trim()) {
+      setEditingHouseId(null);
+      return;
+    }
+    try {
+      await api.put(`/territories/streets/houses/${houseId}`, {
+        number: editHouseNumber
+      });
+      toast.success('Número da casa atualizado com sucesso!');
+      setEditingHouseId(null);
+      // Refresh streets and block details
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar número da casa');
     }
   };
 
@@ -570,7 +712,7 @@ function AssignmentDetail() {
   const canCancel = isAdmin && !isMyAssignment && ['pending', 'in_progress'].includes(assignment.status);
   const showOverdueAlert = isOverdue && assignment.status !== 'returned' && assignment.status !== 'completed';
   const hasActivePublisherAssignments = Array.isArray(blockDetails) && blockDetails.some(
-    block => block.publisher_assignment && block.publisher_assignment.status === 'in_progress'
+    block => block.publisher_assignments && block.publisher_assignments.some(pa => pa.status === 'in_progress')
   );
 
   return (
@@ -625,6 +767,8 @@ function AssignmentDetail() {
               onClick={() => {
                 setNewStreetBlock(1);
                 setSelectedStreetForHouse('');
+                setEditingStreetIdForFields(null);
+                setEditingHouseId(null);
                 setShowManageStreetsModal(true);
               }}
               className="btn btn-secondary py-1.5 px-3 text-xs"
@@ -681,34 +825,41 @@ function AssignmentDetail() {
                   </div>
 
                   {/* Publisher Assignment Info */}
-                  <div className="flex items-center gap-2">
-                    {pubAssign ? (
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2.5 py-0.5 rounded text-xs font-semibold ${
-                          pubAssign.status === 'in_progress'
-                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
-                            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
-                        }`}>
-                          {pubAssign.status === 'in_progress' ? 'Em andamento' : 'Devolvido'} • {pubAssign.publisher_name}
-                        </span>
-                        {(isAdmin || isMyAssignment) && pubAssign.status === 'in_progress' && (
-                          <button
-                            onClick={() => openAssignModal(block.block_number)}
-                            className="text-xs text-slate-500 hover:text-primary-600 underline"
-                          >
-                            Reatribuir
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      (isAdmin || isMyAssignment) && (assignment.status === 'pending' || assignment.status === 'in_progress') && (
-                        <button
-                          onClick={() => openAssignModal(block.block_number)}
-                          className="btn btn-secondary py-1 px-2.5 text-xs font-medium"
-                        >
-                          Designar Publicador
-                        </button>
-                      )
+                  <div className="flex flex-col gap-1.5 items-end">
+                    {block.publisher_assignments && block.publisher_assignments.filter(pa => pa.status === 'in_progress').map(pa => {
+                      // Find street names for this assignment
+                      const assignedStreetsForPa = blockHouses.filter(h => pa.street_ids?.includes(h.street_id));
+                      const uniqueStreetNames = [...new Set(assignedStreetsForPa.map(h => h.street_name))].join(', ');
+
+                      return (
+                        <div key={pa.id} className="flex items-center gap-2 text-xs">
+                          <span className="bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 px-2.5 py-1 rounded font-semibold">
+                            Em andamento • {pa.publisher_name} ({uniqueStreetNames || 'Todas as ruas'})
+                          </span>
+                        </div>
+                      );
+                    })}
+
+                    {/* Button to assign a new publisher if there are any unassigned streets in this block */}
+                    {(isAdmin || isMyAssignment) && (assignment.status === 'pending' || assignment.status === 'in_progress') && (
+                      (() => {
+                        const blockStreetIds = [...new Set(blockHouses.map(h => h.street_id))];
+                        const activeAssigns = block.publisher_assignments?.filter(pa => pa.status === 'in_progress') || [];
+                        const assignedIds = new Set(activeAssigns.flatMap(pa => pa.street_ids || []));
+                        const hasUnassignedStreets = blockStreetIds.some(sid => !assignedIds.has(sid));
+
+                        if (hasUnassignedStreets && blockStreetIds.length > 0) {
+                          return (
+                            <button
+                              onClick={() => openAssignModal(block.block_number)}
+                              className="btn btn-secondary py-1 px-2.5 text-xs font-medium"
+                            >
+                              Designar Publicador
+                            </button>
+                          );
+                        }
+                        return null;
+                      })()
                     )}
                   </div>
                 </div>
@@ -728,23 +879,69 @@ function AssignmentDetail() {
                   ) : (
                     Object.entries(groupedHouses).map(([streetName, streetHouses]) => (
                       <div key={streetName} className="space-y-1.5">
-                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{streetName}</span>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{streetName}</span>
+                          {editingStreetId === streetHouses[0]?.street_id ? (
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <input
+                                type="text"
+                                value={editingText}
+                                onChange={(e) => setEditingText(e.target.value)}
+                                placeholder="Observações da rua..."
+                                className="input py-0.5 px-2 text-[10px] w-64"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleSaveObservations(streetHouses[0]?.street_id)}
+                                className="btn btn-primary py-0.5 px-2 text-[9px]"
+                              >
+                                Salvar
+                              </button>
+                              <button
+                                onClick={() => setEditingStreetId(null)}
+                                className="btn btn-secondary py-0.5 px-2 text-[9px]"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-amber-600 dark:text-amber-500 font-medium">
+                                {streetHouses[0]?.street_observations ? `Obs: ${streetHouses[0].street_observations}` : 'Sem observações'}
+                              </span>
+                              isAdmin && (assignment.status === 'pending' || assignment.status === 'in_progress') && (
+                                <button
+                                  onClick={() => startEditing(streetHouses[0]?.street_id, streetHouses[0]?.street_observations)}
+                                  className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 text-[9px] font-semibold flex items-center gap-0.5"
+                                >
+                                  <Edit2 className="w-2.5 h-2.5" />
+                                  Editar
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                         <div className="flex flex-wrap gap-2">
-                          {streetHouses.map((house) => (
-                            <button
-                              key={house.house_id}
-                              onClick={() => (isAdmin || isMyAssignment) && (assignment.status === 'pending' || assignment.status === 'in_progress') && handleToggleHouse(house.house_id, house.visited)}
-                              disabled={!(isAdmin || isMyAssignment) || !(assignment.status === 'pending' || assignment.status === 'in_progress')}
-                              className={`flex items-center gap-1.5 py-1 px-2.5 rounded-lg border text-xs font-semibold transition-all ${
-                                house.visited
-                                  ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
-                                  : 'bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                              }`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full ${house.visited ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
-                              Nº {house.house_number}
-                            </button>
-                          ))}
+                          {streetHouses.map((house) => {
+                            const isDontVisit = house.dont_visit;
+                            return (
+                              <button
+                                key={house.house_id}
+                                onClick={() => !isDontVisit && (isAdmin || isMyAssignment) && (assignment.status === 'pending' || assignment.status === 'in_progress') && handleToggleHouse(house.house_id, house.visited)}
+                                disabled={isDontVisit || !(isAdmin || isMyAssignment) || !(assignment.status === 'pending' || assignment.status === 'in_progress')}
+                                className={`flex items-center gap-1.5 py-1 px-2.5 rounded-lg border text-xs font-semibold transition-all ${
+                                  isDontVisit
+                                    ? 'bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-900 text-red-800 dark:text-red-300 cursor-not-allowed'
+                                    : house.visited
+                                      ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                                      : 'bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${isDontVisit ? 'bg-red-500' : house.visited ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                                Nº {house.house_number} {isDontVisit && '(Não Visitar)'}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     ))
@@ -1138,6 +1335,85 @@ function AssignmentDetail() {
             </select>
           </div>
 
+          <div>
+            <label className="input-label flex items-center justify-between">
+              <span>Selecionar Ruas</span>
+              {getUniqueStreetsForSelectedBlock().some(street => {
+                const blockDetail = blockDetails.find(b => b.block_number === selectedBlockForAssign);
+                const activeAssigns = blockDetail?.publisher_assignments?.filter(pa => pa.status === 'in_progress') || [];
+                return !activeAssigns.some(pa => pa.street_ids?.includes(street.street_id));
+              }) && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const blockDetail = blockDetails.find(b => b.block_number === selectedBlockForAssign);
+                      const activeAssigns = blockDetail?.publisher_assignments?.filter(pa => pa.status === 'in_progress') || [];
+                      const assignedIds = new Set(activeAssigns.flatMap(pa => pa.street_ids || []));
+                      const availableStreetIds = getUniqueStreetsForSelectedBlock()
+                        .map(s => s.street_id)
+                        .filter(id => !assignedIds.has(id));
+                      setSelectedStreetIds(availableStreetIds);
+                    }}
+                    className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-semibold"
+                  >
+                    Selecionar Todas
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-600">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStreetIds([])}
+                    className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-semibold"
+                  >
+                    Limpar Seleção
+                  </button>
+                </div>
+              )}
+            </label>
+            <div className="space-y-2.5 max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg p-3 bg-white dark:bg-slate-800">
+              {getUniqueStreetsForSelectedBlock().map(street => {
+                const blockDetail = blockDetails.find(b => b.block_number === selectedBlockForAssign);
+                const activeAssigns = blockDetail?.publisher_assignments?.filter(pa => pa.status === 'in_progress') || [];
+                const activeAssignForStreet = activeAssigns.find(pa => pa.street_ids?.includes(street.street_id));
+                const isAssigned = !!activeAssignForStreet;
+
+                return (
+                  <label
+                    key={street.street_id}
+                    className={`flex items-center gap-2.5 p-1 rounded transition-colors ${
+                      isAssigned
+                        ? 'text-slate-400 dark:text-slate-500 cursor-not-allowed bg-slate-50 dark:bg-slate-800/40'
+                        : 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/30'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      value={street.street_id}
+                      checked={selectedStreetIds.includes(street.street_id)}
+                      disabled={isAssigned}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedStreetIds([...selectedStreetIds, street.street_id]);
+                        } else {
+                          setSelectedStreetIds(selectedStreetIds.filter(id => id !== street.street_id));
+                        }
+                      }}
+                      className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 disabled:opacity-50"
+                    />
+                    <span className="text-sm font-medium">
+                      {street.street_name}
+                      {isAssigned && (
+                        <span className="text-xs text-amber-600 dark:text-amber-500 ml-1.5 font-medium">
+                          (Designada para {activeAssignForStreet.publisher_name})
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-xl text-xs text-slate-500">
             <p><strong>Nota:</strong> O publicador terá um prazo de 24 horas para trabalhar nesta quadra e devolver o cartão. O sistema enviará notificações push para alertá-lo.</p>
           </div>
@@ -1196,6 +1472,15 @@ function AssignmentDetail() {
                 </select>
               </div>
             </div>
+            <div>
+              <input
+                type="text"
+                value={newStreetObservations}
+                onChange={(e) => setNewStreetObservations(e.target.value)}
+                placeholder="Observações da Rua (Ex: Não visitar casa 120)"
+                className="input"
+              />
+            </div>
             <button type="submit" className="btn btn-primary w-full py-2.5 text-xs font-semibold">
               <Plus className="w-4 h-4 mr-1" /> Adicionar Rua
             </button>
@@ -1240,6 +1525,19 @@ function AssignmentDetail() {
                     />
                   </div>
                 </div>
+                <div className="flex items-center gap-2.5">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newHouseDontVisit}
+                      onChange={(e) => setNewHouseDontVisit(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Marcar como "Não Bater/Visitar"
+                    </span>
+                  </label>
+                </div>
                 <button type="submit" className="btn btn-primary w-full py-2.5 text-xs font-semibold">
                   <Plus className="w-4 h-4 mr-1" /> Adicionar Casa
                 </button>
@@ -1259,11 +1557,12 @@ function AssignmentDetail() {
                       id: s.street_id,
                       name: s.street_name,
                       block: s.block_number,
+                      observations: s.street_observations,
                       houses: []
                     };
                   }
                   if (s.house_id) {
-                    groupedStreets[s.street_id].houses.push({ id: s.house_id, number: s.house_number });
+                    groupedStreets[s.street_id].houses.push({ id: s.house_id, number: s.house_number, dont_visit: s.dont_visit });
                   }
                 }
               }
@@ -1278,18 +1577,88 @@ function AssignmentDetail() {
                 <div className="space-y-3">
                   {streetList.map(street => (
                     <div key={street.id} className="border border-slate-100 dark:border-slate-700/60 rounded-xl p-3 space-y-2">
-                      <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/20 p-2 rounded-lg">
-                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                          Quadra {street.block} - {street.name}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteStreet(street.id)}
-                          className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {editingStreetIdForFields === street.id ? (
+                        <div className="flex flex-col gap-2 w-full p-2 bg-slate-50 dark:bg-slate-800/20 rounded-lg">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500">Nome da Rua</label>
+                              <input
+                                type="text"
+                                value={editStreetName}
+                                onChange={(e) => setEditStreetName(e.target.value)}
+                                className="input py-1 px-2.5 text-xs w-full"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500">Quadra</label>
+                              <select
+                                value={editStreetBlock}
+                                onChange={(e) => setEditStreetBlock(Number(e.target.value))}
+                                className="input py-1 px-2.5 text-xs w-full"
+                              >
+                                {assignment && Array.from({ length: assignment.block_count }, (_, i) => i + 1).map(b => (
+                                  <option key={b} value={b}>Quadra {b}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500">Observações</label>
+                              <input
+                                type="text"
+                                value={editStreetObs}
+                                onChange={(e) => setEditStreetObs(e.target.value)}
+                                className="input py-1 px-2.5 text-xs w-full"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex justify-end gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveStreetFields(street.id)}
+                              className="btn btn-primary py-0.5 px-2.5 text-[10px]"
+                            >
+                              Salvar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingStreetIdForFields(null)}
+                              className="btn btn-secondary py-0.5 px-2.5 text-[10px]"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/20 p-2 rounded-lg">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                              Quadra {street.block} - {street.name}
+                            </span>
+                            {street.observations && (
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                Obs: {street.observations}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => startEditingStreetFields(street)}
+                              className="p-1 text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded transition-colors"
+                              title="Editar rua"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteStreet(street.id)}
+                              className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex flex-wrap gap-2 px-1">
                         {street.houses.length === 0 ? (
                           <span className="text-xs text-slate-400">Nenhuma casa adicionada.</span>
@@ -1297,16 +1666,54 @@ function AssignmentDetail() {
                           street.houses.map(house => (
                             <span
                               key={house.id}
-                              className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700"
+                              className={`inline-flex items-center gap-1 text-xs font-semibold py-1 px-2 rounded-lg border transition-colors ${
+                                house.dont_visit
+                                  ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-950/20 dark:border-red-900/30 dark:text-red-300'
+                                  : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                              }`}
                             >
-                              Nº {house.number}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteHouse(house.id)}
-                                className="text-red-500 hover:text-red-700 ml-1 font-bold text-sm"
-                              >
-                                &times;
-                              </button>
+                              {editingHouseId === house.id ? (
+                                <input
+                                  type="text"
+                                  value={editHouseNumber}
+                                  onChange={(e) => setEditHouseNumber(e.target.value)}
+                                  onBlur={() => handleSaveHouseNumber(house.id)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveHouseNumber(house.id);
+                                    if (e.key === 'Escape') setEditingHouseId(null);
+                                  }}
+                                  className="w-12 py-0 px-1 text-xs bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded text-slate-800 dark:text-white"
+                                  autoFocus
+                                />
+                              ) : (
+                                <>
+                                  <span 
+                                    onClick={() => handleToggleDontVisit(house.id, house.dont_visit)}
+                                    className="cursor-pointer hover:underline"
+                                    title="Clique para alternar status Não Visitar"
+                                  >
+                                    Nº {house.number} {house.dont_visit && '(Não Visitar)'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingHouseId(house.id);
+                                      setEditHouseNumber(house.number);
+                                    }}
+                                    className="text-indigo-500 hover:text-indigo-700 ml-1 font-bold text-xs"
+                                    title="Editar número da casa"
+                                  >
+                                    ✎
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteHouse(house.id)}
+                                    className="text-red-500 hover:text-red-700 ml-1 font-bold text-sm"
+                                  >
+                                    &times;
+                                  </button>
+                                </>
+                              )}
                             </span>
                           ))
                         )}

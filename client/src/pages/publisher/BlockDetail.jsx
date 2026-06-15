@@ -11,7 +11,8 @@ import {
   CheckSquare,
   Square,
   Send,
-  AlertCircle
+  AlertCircle,
+  Edit2
 } from 'lucide-react';
 import { format, parseISO, isPast } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -25,6 +26,8 @@ function PublisherBlockDetail() {
   const [houses, setHouses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [editingStreetId, setEditingStreetId] = useState(null);
+  const [editingText, setEditingText] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -64,6 +67,27 @@ function PublisherBlockDetail() {
     } catch (error) {
       toast.error('Erro ao atualizar status da casa');
       console.error(error);
+    }
+  };
+
+  const startEditing = (streetId, currentText) => {
+    setEditingStreetId(streetId);
+    setEditingText(currentText || '');
+  };
+
+  const handleSaveObservations = async (streetId) => {
+    try {
+      await api.put(`/assignments/streets/${streetId}/observations`, {
+        observations: editingText
+      });
+      toast.success('Observações atualizadas com sucesso!');
+      setEditingStreetId(null);
+      
+      // Refresh houses to get the updated observations
+      const housesRes = await api.get(`/assignments/publisher-assignments/${id}/houses`);
+      setHouses(housesRes.data);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar observações');
     }
   };
 
@@ -107,8 +131,8 @@ function PublisherBlockDetail() {
   }
 
   // Calculate stats
-  const totalHouses = houses.length;
-  const visitedHouses = houses.filter(h => h.visited).length;
+  const totalHouses = houses.filter(h => !h.dont_visit).length;
+  const visitedHouses = houses.filter(h => h.visited && !h.dont_visit).length;
   const coveragePercentage = totalHouses > 0 ? Math.round((visitedHouses / totalHouses) * 100) : 0;
 
   return (
@@ -190,33 +214,52 @@ function PublisherBlockDetail() {
             Nenhuma rua ou casa cadastrada para esta quadra. Contate o administrador.
           </div>
         ) : (
-          Object.entries(housesByStreet).map(([streetName, streetHouses]) => (
-            <div key={streetName} className="card">
-              <div className="card-header bg-slate-50/50 dark:bg-slate-800/30">
-                <h3 className="font-semibold text-slate-800 dark:text-white">{streetName}</h3>
+          Object.entries(housesByStreet).map(([streetName, streetHouses]) => {
+            const streetId = streetHouses[0]?.street_id;
+            const currentObs = streetHouses[0]?.street_observations;
+            return (
+              <div key={streetName} className="card">
+                <div className="card-header bg-slate-50/50 dark:bg-slate-800/30 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+                  <h3 className="font-semibold text-slate-800 dark:text-white">{streetName}</h3>
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <span className="text-slate-500 dark:text-slate-400 font-medium">
+                      {currentObs ? `Obs: ${currentObs}` : 'Sem observações'}
+                    </span>
+                  </div>
+                </div>
+                <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {streetHouses.map((house) => {
+                    const isDontVisit = house.dont_visit;
+                    return (
+                      <button
+                        key={house.house_id}
+                        onClick={() => !isDontVisit && handleToggleHouse(house.house_id, house.visited)}
+                        disabled={isDontVisit}
+                        className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${
+                          isDontVisit
+                            ? 'bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-900 text-red-800 dark:text-red-300 cursor-not-allowed'
+                            : house.visited
+                              ? 'bg-emerald-50/40 border-emerald-200 dark:bg-emerald-950/10 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300'
+                              : 'bg-white border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700/50 text-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        {isDontVisit ? (
+                          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                        ) : house.visited ? (
+                          <CheckSquare className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                        ) : (
+                          <Square className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                        )}
+                        <span className="font-semibold text-base">
+                          Nº {house.house_number} {isDontVisit && '(Não Visitar)'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {streetHouses.map((house) => (
-                  <button
-                    key={house.house_id}
-                    onClick={() => handleToggleHouse(house.house_id, house.visited)}
-                    className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${
-                      house.visited
-                        ? 'bg-emerald-50/40 border-emerald-200 dark:bg-emerald-950/10 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300'
-                        : 'bg-white border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700/50 text-slate-800 dark:text-slate-300'
-                    }`}
-                  >
-                    {house.visited ? (
-                      <CheckSquare className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    ) : (
-                      <Square className="w-5 h-5 text-slate-400 flex-shrink-0" />
-                    )}
-                    <span className="font-semibold text-base">Nº {house.house_number}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

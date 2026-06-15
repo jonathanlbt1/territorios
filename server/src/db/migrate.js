@@ -89,6 +89,7 @@ const migrate = async () => {
         territory_id INTEGER NOT NULL REFERENCES territories(id) ON DELETE CASCADE,
         block_number INTEGER NOT NULL,
         name VARCHAR(255) NOT NULL,
+        observations TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -101,6 +102,7 @@ const migrate = async () => {
         id SERIAL PRIMARY KEY,
         street_id INTEGER NOT NULL REFERENCES streets(id) ON DELETE CASCADE,
         number VARCHAR(100) NOT NULL,
+        dont_visit BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -114,6 +116,7 @@ const migrate = async () => {
         assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
         publisher_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         block_number INTEGER NOT NULL,
+        street_ids INTEGER[],
         status VARCHAR(50) DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'returned')),
         assigned_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         due_date TIMESTAMP NOT NULL,
@@ -251,6 +254,48 @@ const migrate = async () => {
       END $$;
     `);
     console.log('✅ Territory history conclusion_date column checked/created');
+
+    // Add street_ids column to publisher_assignments if not exists
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'publisher_assignments' AND column_name = 'street_ids'
+        ) THEN
+          ALTER TABLE publisher_assignments ADD COLUMN street_ids INTEGER[];
+        END IF;
+      END $$;
+    `);
+    console.log('✅ Publisher assignments street_ids column checked/created');
+
+    // Add dont_visit column to houses if not exists
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'houses' AND column_name = 'dont_visit'
+        ) THEN
+          ALTER TABLE houses ADD COLUMN dont_visit BOOLEAN DEFAULT FALSE;
+        END IF;
+      END $$;
+    `);
+    console.log('✅ Houses dont_visit column checked/created');
+
+    // Add observations column to streets if not exists
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'streets' AND column_name = 'observations'
+        ) THEN
+          ALTER TABLE streets ADD COLUMN observations TEXT;
+        END IF;
+      END $$;
+    `);
+    console.log('✅ Streets observations column checked/created');
 
     console.log('🎉 Migration completed successfully!');
   } catch (error) {

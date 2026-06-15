@@ -283,8 +283,8 @@ router.get('/:id/streets', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(`
-      SELECT s.id as street_id, s.name as street_name, s.block_number,
-             h.id as house_id, h.number as house_number
+      SELECT s.id as street_id, s.name as street_name, s.block_number, s.observations as street_observations,
+             h.id as house_id, h.number as house_number, h.dont_visit
       FROM streets s
       LEFT JOIN houses h ON h.street_id = s.id
       WHERE s.territory_id = $1
@@ -301,15 +301,15 @@ router.get('/:id/streets', authenticateToken, async (req, res) => {
 router.post('/:id/streets', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, block_number } = req.body;
+    const { name, block_number, observations } = req.body;
     if (!name || !block_number) {
       return res.status(400).json({ error: 'Nome da rua e número da quadra são obrigatórios' });
     }
     const result = await pool.query(`
-      INSERT INTO streets (territory_id, block_number, name)
-      VALUES ($1, $2, $3)
+      INSERT INTO streets (territory_id, block_number, name, observations)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
-    `, [id, block_number, name]);
+    `, [id, block_number, name, observations || null]);
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Add street error:', error);
@@ -333,19 +333,122 @@ router.delete('/streets/:streetId', authenticateToken, requireAdmin, async (req,
 router.post('/streets/:streetId/houses', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { streetId } = req.params;
-    const { number } = req.body;
+    const { number, dont_visit } = req.body;
     if (!number) {
       return res.status(400).json({ error: 'Número da casa é obrigatório' });
     }
+
+    // Check if the house number already exists on this street (case-insensitive and ignore spaces)
+    const existingHouse = await pool.query(`
+      SELECT 1 FROM houses 
+      WHERE street_id = $1 
+        AND REPLACE(LOWER(number), ' ', '') = REPLACE(LOWER($2), ' ', '')
+    `, [streetId, number.trim()]);
+
+    if (existingHouse.rows.length > 0) {
+      return res.status(400).json({ error: 'Este número de casa já está cadastrado nesta rua.' });
+    }
+
     const result = await pool.query(`
-      INSERT INTO houses (street_id, number)
-      VALUES ($1, $2)
+      INSERT INTO houses (street_id, number, dont_visit)
+      VALUES ($1, $2, $3)
       RETURNING *
-    `, [streetId, number]);
+    `, [streetId, number.trim(), !!dont_visit]);
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Add house error:', error);
     res.status(500).json({ error: 'Erro ao adicionar número da casa' });
+  }
+});
+
+// Update street details (Admin only)
+router.put('/streets/:streetId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { streetId } = req.params;
+    const { name, block_number, observations } = req.body;
+
+    const fields = [];
+    const values = [];
+
+    if (name !== undefined) {
+      fields.push(`name = $${values.length + 1}`);
+      values.push(name.trim());
+    }
+    if (block_number !== undefined) {
+      fields.push(`block_number = $${values.length + 1}`);
+      values.push(Number(block_number));
+    }
+    if (observations !== undefined) {
+      fields.push(`observations = $${values.length + 1}`);
+      values.push(observations || null);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'Nenhum campo informado para atualização' });
+    }
+
+    fields.push(`updated_at = CURRENT_TIMESTAMP`);
+    const query = `UPDATE streets SET ${fields.join(', ')} WHERE id = $${values.length + 1} RETURNING *`;
+    values.push(streetId);
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Rua não encontrada' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Update street error:', error);
+    res.status(500).json({ error: 'Erro ao atualizar rua' });
+  }
+});
+
+// Update house details (Admin only)
+router.put('/streets/houses/:houseId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { houseId } = req.params;
+    const { number, dont_visit } = req.body;
+
+    if (number) {
+      // Get the street_id of this house
+      const houseRes = await pool.query('SELECT street_id FROM houses WHERE id = $1', [houseId]);
+      if (houseRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Casa não encontrada' });
+      }
+      const streetId = houseRes.rows[0].street_id;
+
+      // Check if another house on the same street already has this number
+      const existingHouse = await pool.query(`
+        SELECT 1 FROM houses 
+        WHERE street_id = $1 
+          AND id != $2
+          AND REPLACE(LOWER(number), ' ', '') = REPLACE(LOWER($3), ' ', '')
+      `, [streetId, houseId, number.trim()]);
+
+      if (existingHouse.rows.length > 0) {
+        return res.status(400).json({ error: 'Este número de casa já está cadastrado nesta rua.' });
+      }
+    }
+
+    const result = await pool.query(`
+      UPDATE houses
+      SET 
+        number = COALESCE($1, number),
+        dont_visit = COALESCE($2, dont_visit),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *
+    `, [number ? number.trim() : null, dont_visit !== undefined ? !!dont_visit : null, houseId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Casa não encontrada' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Update house error:', error);
+    res.status(500).json({ error: 'Erro ao atualizar casa' });
   }
 });
 
