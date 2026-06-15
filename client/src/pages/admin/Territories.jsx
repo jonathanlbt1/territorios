@@ -42,7 +42,14 @@ function AdminTerritories() {
   const [newStreetBlock, setNewStreetBlock] = useState(1);
   const [selectedStreetForHouse, setSelectedStreetForHouse] = useState('');
   const [newHouseNumber, setNewHouseNumber] = useState('');
+  const [newHouseDontVisit, setNewHouseDontVisit] = useState(false);
   const [loadingStreets, setLoadingStreets] = useState(false);
+  const [editingStreetIdForFields, setEditingStreetIdForFields] = useState(null);
+  const [editStreetName, setEditStreetName] = useState('');
+  const [editStreetBlock, setEditStreetBlock] = useState(1);
+  const [editStreetObs, setEditStreetObs] = useState('');
+  const [editingHouseId, setEditingHouseId] = useState(null);
+  const [editHouseNumber, setEditHouseNumber] = useState('');
 
   // Create form state
   const [createForm, setCreateForm] = useState({
@@ -90,6 +97,9 @@ function AdminTerritories() {
     setNewStreetBlock(1);
     setSelectedStreetForHouse('');
     setNewHouseNumber('');
+    setNewHouseDontVisit(false);
+    setEditingStreetIdForFields(null);
+    setEditingHouseId(null);
     fetchStreets(territory.id);
     setShowManageStreetsModal(true);
   };
@@ -126,13 +136,27 @@ function AdminTerritories() {
     if (!newHouseNumber.trim() || !selectedStreetForHouse || !selectedTerritoryForStreets) return;
     try {
       await api.post(`/territories/streets/${selectedStreetForHouse}/houses`, {
-        number: newHouseNumber
+        number: newHouseNumber,
+        dont_visit: newHouseDontVisit
       });
       toast.success('Casa adicionada com sucesso!');
       setNewHouseNumber('');
+      setNewHouseDontVisit(false);
       fetchStreets(selectedTerritoryForStreets.id);
     } catch (error) {
-      toast.error('Erro ao adicionar casa');
+      toast.error(error.response?.data?.error || 'Erro ao adicionar casa');
+    }
+  };
+
+  const handleToggleDontVisit = async (houseId, currentDontVisit) => {
+    try {
+      await api.put(`/territories/streets/houses/${houseId}`, {
+        dont_visit: !currentDontVisit
+      });
+      toast.success('Status da casa atualizado com sucesso!');
+      fetchStreets(selectedTerritoryForStreets.id);
+    } catch (error) {
+      toast.error('Erro ao atualizar status da casa');
     }
   };
 
@@ -144,6 +168,46 @@ function AdminTerritories() {
       fetchStreets(selectedTerritoryForStreets.id);
     } catch (error) {
       toast.error('Erro ao excluir casa');
+    }
+  };
+
+  const startEditingStreetFields = (street) => {
+    setEditingStreetIdForFields(street.id);
+    setEditStreetName(street.name);
+    setEditStreetBlock(street.block);
+    setEditStreetObs(street.observations || '');
+  };
+
+  const handleSaveStreetFields = async (streetId) => {
+    if (!editStreetName.trim() || !editStreetBlock) return;
+    try {
+      await api.put(`/territories/streets/${streetId}`, {
+        name: editStreetName,
+        block_number: editStreetBlock,
+        observations: editStreetObs
+      });
+      toast.success('Rua atualizada com sucesso!');
+      setEditingStreetIdForFields(null);
+      fetchStreets(selectedTerritoryForStreets.id);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar rua');
+    }
+  };
+
+  const handleSaveHouseNumber = async (houseId) => {
+    if (!editHouseNumber.trim()) {
+      setEditingHouseId(null);
+      return;
+    }
+    try {
+      await api.put(`/territories/streets/houses/${houseId}`, {
+        number: editHouseNumber
+      });
+      toast.success('Número da casa atualizado com sucesso!');
+      setEditingHouseId(null);
+      fetchStreets(selectedTerritoryForStreets.id);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar número da casa');
     }
   };
 
@@ -957,6 +1021,19 @@ function AdminTerritories() {
                     />
                   </div>
                 </div>
+                <div className="flex items-center gap-2.5">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newHouseDontVisit}
+                      onChange={(e) => setNewHouseDontVisit(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Marcar como "Não Bater/Visitar"
+                    </span>
+                  </label>
+                </div>
                 <button type="submit" className="btn btn-primary w-full py-2.5 text-xs font-semibold">
                   <Plus className="w-4 h-4 mr-1" /> Adicionar Casa
                 </button>
@@ -980,11 +1057,12 @@ function AdminTerritories() {
                       id: s.street_id,
                       name: s.street_name,
                       block: s.block_number,
+                      observations: s.street_observations,
                       houses: []
                     };
                   }
                   if (s.house_id) {
-                    groupedStreets[s.street_id].houses.push({ id: s.house_id, number: s.house_number });
+                    groupedStreets[s.street_id].houses.push({ id: s.house_id, number: s.house_number, dont_visit: s.dont_visit });
                   }
                 }
               }
@@ -999,18 +1077,88 @@ function AdminTerritories() {
                 <div className="space-y-3">
                   {streetList.map(street => (
                     <div key={street.id} className="border border-slate-100 dark:border-slate-700/60 rounded-xl p-3 space-y-2">
-                      <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/20 p-2 rounded-lg">
-                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                          Quadra {street.block} - {street.name}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteStreet(street.id)}
-                          className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {editingStreetIdForFields === street.id ? (
+                        <div className="flex flex-col gap-2 w-full p-2 bg-slate-50 dark:bg-slate-800/20 rounded-lg">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500">Nome da Rua</label>
+                              <input
+                                type="text"
+                                value={editStreetName}
+                                onChange={(e) => setEditStreetName(e.target.value)}
+                                className="input py-1 px-2.5 text-xs w-full"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500">Quadra</label>
+                              <select
+                                value={editStreetBlock}
+                                onChange={(e) => setEditStreetBlock(Number(e.target.value))}
+                                className="input py-1 px-2.5 text-xs w-full"
+                              >
+                                {Array.from({ length: selectedTerritoryForStreets.block_count }, (_, i) => i + 1).map(b => (
+                                  <option key={b} value={b}>Quadra {b}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500">Observações</label>
+                              <input
+                                type="text"
+                                value={editStreetObs}
+                                onChange={(e) => setEditStreetObs(e.target.value)}
+                                className="input py-1 px-2.5 text-xs w-full"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex justify-end gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveStreetFields(street.id)}
+                              className="btn btn-primary py-0.5 px-2.5 text-[10px]"
+                            >
+                              Salvar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingStreetIdForFields(null)}
+                              className="btn btn-secondary py-0.5 px-2.5 text-[10px]"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/20 p-2 rounded-lg">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                              Quadra {street.block} - {street.name}
+                            </span>
+                            {street.observations && (
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                Obs: {street.observations}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => startEditingStreetFields(street)}
+                              className="p-1 text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded transition-colors"
+                              title="Editar rua"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteStreet(street.id)}
+                              className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex flex-wrap gap-2 px-1">
                         {street.houses.length === 0 ? (
                           <span className="text-xs text-slate-400">Nenhuma casa adicionada.</span>
@@ -1018,16 +1166,54 @@ function AdminTerritories() {
                           street.houses.map(house => (
                             <span
                               key={house.id}
-                              className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700"
+                              className={`inline-flex items-center gap-1 text-xs font-semibold py-1 px-2 rounded-lg border transition-colors ${
+                                house.dont_visit
+                                  ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-950/20 dark:border-red-900/30 dark:text-red-300'
+                                  : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                              }`}
                             >
-                              Nº {house.number}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteHouse(house.id)}
-                                className="text-red-500 hover:text-red-700 ml-1 font-bold text-sm"
-                              >
-                                &times;
-                              </button>
+                              {editingHouseId === house.id ? (
+                                <input
+                                  type="text"
+                                  value={editHouseNumber}
+                                  onChange={(e) => setEditHouseNumber(e.target.value)}
+                                  onBlur={() => handleSaveHouseNumber(house.id)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveHouseNumber(house.id);
+                                    if (e.key === 'Escape') setEditingHouseId(null);
+                                  }}
+                                  className="w-12 py-0 px-1 text-xs bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded text-slate-800 dark:text-white"
+                                  autoFocus
+                                />
+                              ) : (
+                                <>
+                                  <span 
+                                    onClick={() => handleToggleDontVisit(house.id, house.dont_visit)}
+                                    className="cursor-pointer hover:underline"
+                                    title="Clique para alternar status Não Visitar"
+                                  >
+                                    Nº {house.number} {house.dont_visit && '(Não Visitar)'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingHouseId(house.id);
+                                      setEditHouseNumber(house.number);
+                                    }}
+                                    className="text-indigo-500 hover:text-indigo-700 ml-1 font-bold text-xs"
+                                    title="Editar número da casa"
+                                  >
+                                    ✎
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteHouse(house.id)}
+                                    className="text-red-500 hover:text-red-700 ml-1 font-bold text-sm"
+                                  >
+                                    &times;
+                                  </button>
+                                </>
+                              )}
                             </span>
                           ))
                         )}

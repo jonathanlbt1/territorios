@@ -219,11 +219,44 @@ describe('Database Migration', () => {
       expect(conclusionDateQuery[0]).toContain('ALTER TABLE territory_history ADD COLUMN conclusion_date DATE');
     });
 
+    it('should add street_ids column to publisher_assignments if not exists', async () => {
+      await migrate();
+
+      const streetIdsQuery = mockClient.query.mock.calls.find(
+        (call) => call[0].includes("column_name = 'street_ids'")
+      );
+      expect(streetIdsQuery).toBeDefined();
+      expect(streetIdsQuery[0]).toContain('ALTER TABLE publisher_assignments ADD COLUMN street_ids INTEGER[]');
+    });
+
+    it('should add dont_visit column to houses if not exists', async () => {
+      await migrate();
+
+      const dontVisitQuery = mockClient.query.mock.calls.find(
+        (call) => call[0].includes("column_name = 'dont_visit'")
+      );
+      expect(dontVisitQuery).toBeDefined();
+      expect(dontVisitQuery[0]).toContain('ALTER TABLE houses ADD COLUMN dont_visit BOOLEAN DEFAULT FALSE');
+    });
+
+    it('should add observations column to streets if not exists', async () => {
+      await migrate();
+
+      const observationsQuery = mockClient.query.mock.calls.find(
+        (call) => call[0].includes("column_name = 'observations'")
+      );
+      expect(observationsQuery).toBeDefined();
+      expect(observationsQuery[0]).toContain('ALTER TABLE streets ADD COLUMN observations TEXT');
+    });
+
     it('should log success message for column additions', async () => {
       await migrate();
 
       expect(consoleSpy).toHaveBeenCalledWith('✅ Assignments not_worked column checked/created');
       expect(consoleSpy).toHaveBeenCalledWith('✅ Territory history conclusion_date column checked/created');
+      expect(consoleSpy).toHaveBeenCalledWith('✅ Publisher assignments street_ids column checked/created');
+      expect(consoleSpy).toHaveBeenCalledWith('✅ Houses dont_visit column checked/created');
+      expect(consoleSpy).toHaveBeenCalledWith('✅ Streets observations column checked/created');
     });
   });
 
@@ -231,8 +264,8 @@ describe('Database Migration', () => {
     it('should execute all queries in correct order', async () => {
       await migrate();
 
-      // Total expected queries: 6 tables + 4 new tables/constraint updates + 1 indexes + 1 admin lookup + 1 admin seed + 2 column additions + others
-      expect(mockClient.query).toHaveBeenCalledTimes(16);
+      // Total expected queries: 6 tables + 4 new tables/constraint updates + 1 indexes + 1 admin lookup + 1 admin seed + 5 column additions + others
+      expect(mockClient.query).toHaveBeenCalledTimes(19);
 
       const calls = mockClient.query.mock.calls;
       const adminLookupIndex = calls.findIndex((call) =>

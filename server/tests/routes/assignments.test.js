@@ -1027,6 +1027,41 @@ describe('Assignments Routes', () => {
     });
   });
 
+  describe('PUT /assignments/streets/:streetId/observations', () => {
+    it('should allow admin to update observations', async () => {
+      mockAuthenticateToken.mockImplementation((req, res, next) => {
+        req.user = { id: 1, role: 'admin' };
+        next();
+      });
+      mockRequireAdmin.mockImplementation((req, res, next) => next());
+
+      mockPool.query.mockResolvedValueOnce({ rows: [] }); // update
+
+      const response = await request(app)
+        .put('/assignments/streets/5/observations')
+        .send({ observations: 'Test Observations' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.message).toContain('Observações da rua atualizadas com sucesso');
+    });
+
+    it('should deny non-admin roles', async () => {
+      mockAuthenticateToken.mockImplementation((req, res, next) => {
+        req.user = { id: 2, role: 'publisher' };
+        next();
+      });
+      mockRequireAdmin.mockImplementation((req, res, next) => {
+        res.status(403).json({ error: 'Acesso negado' });
+      });
+
+      const response = await request(app)
+        .put('/assignments/streets/5/observations')
+        .send({ observations: 'Test Observations' });
+
+      expect(response.status).toBe(403);
+    });
+  });
+
   describe('Authorization checks', () => {
     it('should require authentication for all routes', async () => {
       mockAuthenticateToken.mockReset();

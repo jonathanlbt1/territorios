@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 // Create mocks with vi.hoisted
@@ -7,6 +7,7 @@ const { mockApi, mockToast, mockUseAuth, mockNavigate } = vi.hoisted(() => ({
   mockApi: {
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
   },
   mockToast: {
     success: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock('lucide-react', () => ({
   FileText: (props) => <svg data-testid="file-text-icon" {...props} />,
   Plus: (props) => <svg data-testid="plus-icon" {...props} />,
   Trash2: (props) => <svg data-testid="trash-icon" {...props} />,
+  Edit2: (props) => <svg data-testid="edit-icon" {...props} />,
 }));
 
 // Mock components
@@ -765,6 +767,364 @@ describe('AssignmentDetail', () => {
       
       await waitFor(() => {
         expect(mockToast.error).toHaveBeenCalledWith('Cancel failed');
+      });
+    });
+  });
+
+  describe('publisher assignments', () => {
+    it('should open assign publisher modal and display street checklist with blocked/disabled assigned streets', async () => {
+      mockApi.get.mockImplementation((url) => {
+        if (url === '/assignments/1') {
+          return Promise.resolve({ data: createMockAssignment({ block_count: 1 }) });
+        }
+        if (url === '/assignments/1/block-details') {
+          return Promise.resolve({
+            data: [
+              {
+                block_number: 1,
+                percentage: 0,
+                publisher_assignments: [
+                  {
+                    id: 10,
+                    publisher_id: 100,
+                    publisher_name: 'Marcos',
+                    status: 'in_progress',
+                    street_ids: [1],
+                    assigned_date: '2026-06-15T10:00:00Z',
+                    due_date: '2026-06-16T10:00:00Z',
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        if (url === '/assignments/1/houses') {
+          return Promise.resolve({
+            data: [
+              { id: 1001, house_id: 2001, house_number: '120', street_id: 1, street_name: 'Rua Professora Luisinha', block_number: 1, visited: false },
+              { id: 1002, house_id: 2002, house_number: '996', street_id: 2, street_name: 'Rua Capitão Mariano', block_number: 1, visited: false },
+            ],
+          });
+        }
+        if (url === '/users/publishers') {
+          return Promise.resolve({
+            data: [
+              { id: 100, name: 'Marcos', username: 'marcos' },
+              { id: 101, name: 'Lucas', username: 'lucas' },
+            ],
+          });
+        }
+        return Promise.reject(new Error('Unknown url: ' + url));
+      });
+
+      renderComponent();
+
+      // Wait for page to load
+      await waitFor(() => {
+        expect(screen.getByText('Designar Publicador')).toBeInTheDocument();
+      });
+
+      // Click "Designar Publicador"
+      fireEvent.click(screen.getByText('Designar Publicador'));
+
+      // Check modal opening
+      await waitFor(() => {
+        expect(screen.getByTestId('modal')).toHaveAttribute('data-title', 'Designar Quadra 1 para Publicador');
+      });
+
+      // Verify streets are displayed in the checklist within the modal
+      const modal = screen.getByTestId('modal');
+      expect(within(modal).getByText('Rua Professora Luisinha')).toBeInTheDocument();
+      expect(within(modal).getByText('(Designada para Marcos)')).toBeInTheDocument();
+      expect(within(modal).getByText('Rua Capitão Mariano')).toBeInTheDocument();
+
+      // Verify that Rua Professora Luisinha checkbox is disabled because it is already assigned
+      const street1Checkbox = within(modal).getAllByRole('checkbox').find(cb => cb.value === '1');
+      expect(street1Checkbox).toBeDisabled();
+
+      // Verify that Rua Capitão Mariano checkbox is enabled and checked by default since it is available
+      const street2Checkbox = within(modal).getAllByRole('checkbox').find(cb => cb.value === '2');
+      expect(street2Checkbox).toBeEnabled();
+      expect(street2Checkbox).toBeChecked();
+
+      // Select Lucas
+      const select = within(modal).getByLabelText('Selecionar Publicador');
+      fireEvent.change(select, { target: { value: '101' } });
+
+      // Click submit (Designar button)
+      const submitButton = within(modal).getByText('Designar').closest('button');
+      fireEvent.click(submitButton);
+
+      await waitFor(() => {
+        expect(mockApi.post).toHaveBeenCalledWith('/assignments/1/publisher-assignments', {
+          block_number: 1,
+          publisher_id: '101',
+          street_ids: [2],
+        });
+      });
+    });
+  });
+
+  describe('dont visit houses and street observations', () => {
+    it('should display street observations and disable dont_visit houses with red styling', async () => {
+      mockApi.get.mockImplementation((url) => {
+        if (url === '/assignments/1') {
+          return Promise.resolve({ data: createMockAssignment({ block_count: 1 }) });
+        }
+        if (url === '/assignments/1/block-details') {
+          return Promise.resolve({
+            data: [
+              {
+                block_number: 1,
+                percentage: 0,
+                publisher_assignments: [],
+              },
+            ],
+          });
+        }
+        if (url === '/assignments/1/houses') {
+          return Promise.resolve({
+            data: [
+              {
+                id: 1001,
+                house_id: 2001,
+                house_number: '120',
+                street_id: 1,
+                street_name: 'Rua Professora Luisinha',
+                street_observations: 'Cuidado com cão bravo',
+                block_number: 1,
+                visited: false,
+                dont_visit: true,
+              },
+            ],
+          });
+        }
+        return Promise.reject(new Error('Unknown url: ' + url));
+      });
+
+      renderComponent();
+
+      // Wait for page to load and check street observations are displayed
+      await waitFor(() => {
+        expect(screen.getByText('Obs: Cuidado com cão bravo')).toBeInTheDocument();
+      });
+
+      // Verify the dont_visit house number is displayed with annotation
+      const houseButton = screen.getByText(/Nº 120.*Não Visitar/i).closest('button');
+      expect(houseButton).toBeInTheDocument();
+
+      // Verify it is disabled
+      expect(houseButton).toBeDisabled();
+
+      // Verify it has red styling class
+      expect(houseButton).toHaveClass('bg-red-50');
+    });
+
+    it('should allow user to edit street observations and submit change', async () => {
+      mockApi.get.mockImplementation((url) => {
+        if (url === '/assignments/1') {
+          return Promise.resolve({ data: createMockAssignment({ block_count: 1 }) });
+        }
+        if (url === '/assignments/1/block-details') {
+          return Promise.resolve({
+            data: [
+              {
+                block_number: 1,
+                percentage: 0,
+                publisher_assignments: [],
+              },
+            ],
+          });
+        }
+        if (url === '/assignments/1/houses') {
+          return Promise.resolve({
+            data: [
+              {
+                id: 1001,
+                house_id: 2001,
+                house_number: '120',
+                street_id: 5,
+                street_name: 'Rua Professora Luisinha',
+                street_observations: 'Cuidado com cão bravo',
+                block_number: 1,
+                visited: false,
+                dont_visit: false,
+              },
+            ],
+          });
+        }
+        return Promise.reject(new Error('Unknown url: ' + url));
+      });
+
+      renderComponent();
+
+      // Wait for page to load and check street observations edit button
+      await waitFor(() => {
+        expect(screen.getByText('Editar')).toBeInTheDocument();
+      });
+
+      // Click "Editar"
+      fireEvent.click(screen.getByText('Editar'));
+
+      // Check input is rendered with the current observations
+      const input = screen.getByPlaceholderText('Observações da rua...');
+      expect(input).toBeInTheDocument();
+      expect(input.value).toBe('Cuidado com cão bravo');
+
+      // Change input text
+      fireEvent.change(input, { target: { value: 'Nova observacao da rua' } });
+
+      // Click "Salvar"
+      fireEvent.click(screen.getByText('Salvar'));
+
+      // Verify PUT is called
+      await waitFor(() => {
+        expect(mockApi.put).toHaveBeenCalledWith('/assignments/streets/5/observations', {
+          observations: 'Nova observacao da rua',
+        });
+      });
+    });
+
+    it('should allow user to toggle dont_visit on a house via click in the manage modal', async () => {
+      mockUseAuth.mockReturnValue({ user: mockAdminUser, isAdmin: true });
+      mockApi.get.mockImplementation((url) => {
+        if (url === '/assignments/1') {
+          return Promise.resolve({ data: createMockAssignment({ status: 'in_progress' }) });
+        }
+        if (url === '/assignments/1/block-details') {
+          return Promise.resolve({ data: [] });
+        }
+        if (url === '/assignments/1/houses') {
+          return Promise.resolve({
+            data: [
+              {
+                id: 1001,
+                house_id: 2001,
+                house_number: '120',
+                street_id: 5,
+                street_name: 'Rua Professora Luisinha',
+                street_observations: 'Cuidado com cão bravo',
+                block_number: 1,
+                visited: false,
+                dont_visit: false,
+              },
+            ],
+          });
+        }
+        return Promise.reject(new Error('Unknown url: ' + url));
+      });
+
+      renderComponent();
+
+      // Open manage modal
+      await waitFor(() => {
+        expect(screen.getByText('Gerenciar Ruas/Casas')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Gerenciar Ruas/Casas'));
+
+      // Find the house text inside the list
+      await waitFor(() => {
+        expect(screen.getByText('Nº 120')).toBeInTheDocument();
+      });
+
+      // Mock the PUT toggle call
+      mockApi.put.mockResolvedValueOnce({ data: { id: 2001, dont_visit: true } });
+
+      // Click the house number to toggle its dont_visit status
+      fireEvent.click(screen.getByText('Nº 120'));
+
+      // Verify the api is called
+      await waitFor(() => {
+        expect(mockApi.put).toHaveBeenCalledWith('/territories/streets/houses/2001', {
+          dont_visit: true
+        });
+      });
+    });
+
+    it('should allow editing street fields and houses in the manage modal', async () => {
+      mockUseAuth.mockReturnValue({ user: mockAdminUser, isAdmin: true });
+      mockApi.get.mockImplementation((url) => {
+        if (url === '/assignments/1') {
+          return Promise.resolve({ data: createMockAssignment({ status: 'in_progress' }) });
+        }
+        if (url === '/assignments/1/block-details') {
+          return Promise.resolve({ data: [] });
+        }
+        if (url === '/assignments/1/houses') {
+          return Promise.resolve({
+            data: [
+              {
+                id: 1001,
+                house_id: 2001,
+                house_number: '120',
+                street_id: 5,
+                street_name: 'Rua Professora Luisinha',
+                street_observations: 'Cuidado com cão bravo',
+                block_number: 1,
+                visited: false,
+                dont_visit: false,
+              },
+            ],
+          });
+        }
+        return Promise.reject(new Error('Unknown url: ' + url));
+      });
+
+      renderComponent();
+
+      // Open manage modal
+      await waitFor(() => {
+        expect(screen.getByText('Gerenciar Ruas/Casas')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Gerenciar Ruas/Casas'));
+
+      // Find the house text inside the list
+      await waitFor(() => {
+        expect(screen.getByText('Nº 120')).toBeInTheDocument();
+      });
+
+      // Click edit street button
+      const editStreetBtn = screen.getByTitle('Editar rua');
+      expect(editStreetBtn).toBeInTheDocument();
+      fireEvent.click(editStreetBtn);
+
+      // Verify and edit fields
+      const streetNameInput = screen.getByDisplayValue('Rua Professora Luisinha');
+      const streetObsInput = screen.getByDisplayValue('Cuidado com cão bravo');
+      
+      fireEvent.change(streetNameInput, { target: { value: 'Rua A Editada' } });
+      fireEvent.change(streetObsInput, { target: { value: 'Nova obs da rua' } });
+
+      mockApi.put.mockResolvedValueOnce({ data: { id: 5 } });
+
+      // Click "Salvar"
+      fireEvent.click(screen.getByText('Salvar'));
+
+      await waitFor(() => {
+        expect(mockApi.put).toHaveBeenCalledWith('/territories/streets/5', {
+          name: 'Rua A Editada',
+          block_number: 1,
+          observations: 'Nova obs da rua'
+        });
+      });
+
+      // Edit house number
+      const editHouseBtn = screen.getByTitle('Editar número da casa');
+      expect(editHouseBtn).toBeInTheDocument();
+      fireEvent.click(editHouseBtn);
+
+      const houseInput = screen.getByDisplayValue('120');
+      fireEvent.change(houseInput, { target: { value: '120B' } });
+
+      mockApi.put.mockResolvedValueOnce({ data: { id: 2001 } });
+
+      // Blur to save
+      fireEvent.blur(houseInput);
+
+      await waitFor(() => {
+        expect(mockApi.put).toHaveBeenCalledWith('/territories/streets/houses/2001', {
+          number: '120B'
+        });
       });
     });
   });

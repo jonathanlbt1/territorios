@@ -896,6 +896,154 @@ describe('AdminTerritories', () => {
     });
   });
 
+  describe('Manage Streets & Houses dont_visit and observations', () => {
+    it('should display street observations, dont_visit house styles, and allow toggling dont_visit', async () => {
+      mockApi.get.mockImplementation((url) => {
+        if (url === '/territories') {
+          return Promise.resolve({ data: mockTerritories });
+        }
+        if (url === '/territories/png-files') {
+          return Promise.resolve({ data: ['ter_5.png'] });
+        }
+        if (url === '/territories/1/streets') {
+          return Promise.resolve({
+            data: [
+              {
+                street_id: 101,
+                street_name: 'Rua A',
+                block_number: 1,
+                street_observations: 'Cão bravo na rua',
+                house_id: 201,
+                house_number: '12',
+                dont_visit: false
+              }
+            ]
+          });
+        }
+        return Promise.reject(new Error('Unknown url: ' + url));
+      });
+
+      renderComponent();
+
+      // Click "Ruas/Casas" on first territory card to open modal
+      await waitFor(() => {
+        expect(screen.getByText('Centro')).toBeInTheDocument();
+      });
+
+      // Find the card actions or button
+      const manageButtons = screen.getAllByText('Ruas/Casas');
+      fireEvent.click(manageButtons[0]);
+
+      // Verify street observations are displayed in the modal
+      await waitFor(() => {
+        expect(screen.getByText('Obs: Cão bravo na rua')).toBeInTheDocument();
+      });
+
+      // Verify the house is in the modal
+      const houseText = screen.getByText('Nº 12');
+      expect(houseText).toBeInTheDocument();
+
+      // Mock toggle API call
+      mockApi.put.mockResolvedValueOnce({
+        data: { id: 201, number: '12', dont_visit: true }
+      });
+
+      // Click house number to toggle its dont_visit status
+      fireEvent.click(houseText);
+
+      // Verify PUT request is made
+      await waitFor(() => {
+        expect(mockApi.put).toHaveBeenCalledWith('/territories/streets/houses/201', {
+          dont_visit: true
+        });
+      });
+    });
+
+    it('should allow editing street fields and houses', async () => {
+      mockApi.get.mockImplementation((url) => {
+        if (url === '/territories') {
+          return Promise.resolve({ data: mockTerritories });
+        }
+        if (url === '/territories/png-files') {
+          return Promise.resolve({ data: ['ter_5.png'] });
+        }
+        if (url === '/territories/1/streets') {
+          return Promise.resolve({
+            data: [
+              {
+                street_id: 101,
+                street_name: 'Rua A',
+                block_number: 1,
+                street_observations: 'Cão bravo na rua',
+                house_id: 201,
+                house_number: '12',
+                dont_visit: false
+              }
+            ]
+          });
+        }
+        return Promise.reject(new Error('Unknown url: ' + url));
+      });
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByText('Centro')).toBeInTheDocument();
+      });
+
+      const manageButtons = screen.getAllByText('Ruas/Casas');
+      fireEvent.click(manageButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText('Ruas e Casas Cadastradas')).toBeInTheDocument();
+      });
+
+      // Click edit street button
+      const editStreetBtn = screen.getByTitle('Editar rua');
+      expect(editStreetBtn).toBeInTheDocument();
+      fireEvent.click(editStreetBtn);
+
+      // Verify and edit fields
+      const streetNameInput = screen.getByDisplayValue('Rua A');
+      const streetObsInput = screen.getByDisplayValue('Cão bravo na rua');
+      
+      fireEvent.change(streetNameInput, { target: { value: 'Rua A Editada' } });
+      fireEvent.change(streetObsInput, { target: { value: 'Nova obs da rua' } });
+
+      mockApi.put.mockResolvedValueOnce({ data: { id: 101 } });
+
+      // Click "Salvar"
+      fireEvent.click(screen.getByText('Salvar'));
+
+      await waitFor(() => {
+        expect(mockApi.put).toHaveBeenCalledWith('/territories/streets/101', {
+          name: 'Rua A Editada',
+          block_number: 1,
+          observations: 'Nova obs da rua'
+        });
+      });
+
+      // Edit house number
+      const editHouseBtn = screen.getByTitle('Editar número da casa');
+      expect(editHouseBtn).toBeInTheDocument();
+      fireEvent.click(editHouseBtn);
+
+      const houseInput = screen.getByDisplayValue('12');
+      fireEvent.change(houseInput, { target: { value: '12B' } });
+
+      mockApi.put.mockResolvedValueOnce({ data: { id: 201 } });
+
+      // Blur to save
+      fireEvent.blur(houseInput);
+
+      await waitFor(() => {
+        expect(mockApi.put).toHaveBeenCalledWith('/territories/streets/houses/201', {
+          number: '12B'
+        });
+      });
+    });
+  });
+
   describe('accessibility', () => {
     it('should have accessible search input', async () => {
       renderComponent();

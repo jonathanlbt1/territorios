@@ -836,10 +836,10 @@ router.post('/:id/publisher-assignments', authenticateToken, async (req, res) =>
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { block_number, publisher_id } = req.body;
+    const { block_number, publisher_id, street_ids } = req.body;
     
-    if (!block_number || !publisher_id) {
-      return res.status(400).json({ error: 'Número da quadra e publicador são obrigatórios' });
+    if (!block_number || !publisher_id || !street_ids || !Array.isArray(street_ids) || street_ids.length === 0) {
+      return res.status(400).json({ error: 'Quadra, publicador e pelo menos uma rua são obrigatórios' });
     }
 
     const assignmentRes = await client.query(
@@ -856,11 +856,14 @@ router.post('/:id/publisher-assignments', authenticateToken, async (req, res) =>
     }
 
     const existingRes = await client.query(
-      'SELECT id FROM publisher_assignments WHERE assignment_id = $1 AND block_number = $2 AND status = \'in_progress\'',
-      [id, block_number]
+      `SELECT id FROM publisher_assignments 
+       WHERE assignment_id = $1 
+         AND status = 'in_progress' 
+         AND street_ids && $2::integer[]`,
+      [id, street_ids]
     );
     if (existingRes.rows.length > 0) {
-      return res.status(400).json({ error: 'Esta quadra já está designada para um publicador e está em andamento' });
+      return res.status(400).json({ error: 'Uma ou mais ruas selecionadas já estão designadas e em andamento' });
     }
 
     await client.query('BEGIN');
@@ -869,10 +872,10 @@ router.post('/:id/publisher-assignments', authenticateToken, async (req, res) =>
     const dueDate = new Date(assignedDate.getTime() + 24 * 60 * 60 * 1000); // 24 hours later
 
     const insertRes = await client.query(`
-      INSERT INTO publisher_assignments (assignment_id, publisher_id, block_number, assigned_date, due_date, status)
-      VALUES ($1, $2, $3, $4, $5, 'in_progress')
+      INSERT INTO publisher_assignments (assignment_id, publisher_id, block_number, street_ids, assigned_date, due_date, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'in_progress')
       RETURNING *
-    `, [id, publisher_id, block_number, assignedDate, dueDate]);
+    `, [id, publisher_id, block_number, street_ids, assignedDate, dueDate]);
 
     const notifMessage = `Você recebeu a quadra ${block_number} do território ${assignment.territory_code}. Devolva em até 24 horas.`;
     await client.query(`
@@ -958,13 +961,13 @@ router.get('/publisher-assignments/:pubAssignId/houses', authenticateToken, asyn
     const { pubAssignId } = req.params;
 
     const pubAssignRes = await pool.query(
-      'SELECT assignment_id, block_number, publisher_id FROM publisher_assignments WHERE id = $1',
+      'SELECT assignment_id, block_number, publisher_id, street_ids FROM publisher_assignments WHERE id = $1',
       [pubAssignId]
     );
     if (pubAssignRes.rows.length === 0) {
       return res.status(404).json({ error: 'Designação de publicador não encontrada' });
     }
-    const { assignment_id, block_number, publisher_id } = pubAssignRes.rows[0];
+    const { assignment_id, block_number, publisher_id, street_ids } = pubAssignRes.rows[0];
 
     const assignmentRes = await pool.query(
       'SELECT territory_id, dirigente_id FROM assignments WHERE id = $1',
@@ -977,15 +980,17 @@ router.get('/publisher-assignments/:pubAssignId/houses', authenticateToken, asyn
     }
 
     const result = await pool.query(`
-      SELECT s.id as street_id, s.name as street_name, s.block_number,
-             h.id as house_id, h.number as house_number,
+      SELECT s.id as street_id, s.name as street_name, s.block_number, s.observations as street_observations,
+             h.id as house_id, h.number as house_number, h.dont_visit,
              COALESCE(hs.visited, FALSE) as visited
       FROM streets s
       JOIN houses h ON h.street_id = s.id
       LEFT JOIN house_status hs ON hs.house_id = h.id AND hs.assignment_id = $1
-      WHERE s.territory_id = $2 AND s.block_number = $3
+      WHERE s.territory_id = $2 
+        AND s.block_number = $3
+        AND ($4::integer[] IS NULL OR s.id = ANY($4::integer[]))
       ORDER BY s.name, h.number
-    `, [assignment_id, territory_id, block_number]);
+    `, [assignment_id, territory_id, block_number, street_ids]);
 
     res.json(result.rows);
   } catch (error) {
@@ -1001,8 +1006,12 @@ router.post('/:id/houses/:houseId/toggle', authenticateToken, async (req, res) =
     const { id, houseId } = req.params;
     const { visited } = req.body;
 
-    if (visited === undefined) {
-      return res.status(400).json({ error: 'Status de visitação é obrigatório' });
+    const houseRes = await client.query('SELECT dont_visit FROM houses WHERE id = $1', [houseId]);
+    if (houseRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Casa não encontrada' });
+    }
+    if (houseRes.rows[0].dont_visit) {
+      return res.status(400).json({ error: 'Não é possível marcar uma casa configurada como "Não Bater/Visitar"' });
     }
 
     const assignmentRes = await client.query('SELECT * FROM assignments WHERE id = $1', [id]);
@@ -1100,13 +1109,15 @@ router.post('/publisher-assignments/:pubAssignId/return', authenticateToken, asy
 
     const percentageRes = await client.query(`
       SELECT 
-        COUNT(h.id) as total_houses,
-        COUNT(CASE WHEN hs.visited = TRUE THEN 1 END) as visited_houses
+        COUNT(CASE WHEN h.dont_visit = FALSE THEN 1 END) as total_houses,
+        COUNT(CASE WHEN hs.visited = TRUE AND h.dont_visit = FALSE THEN 1 END) as visited_houses
       FROM streets s
       JOIN houses h ON h.street_id = s.id
       LEFT JOIN house_status hs ON hs.house_id = h.id AND hs.assignment_id = $1
-      WHERE s.territory_id = $2 AND s.block_number = $3
-    `, [pubAssign.assignment_id, pubAssign.territory_id, pubAssign.block_number]);
+      WHERE s.territory_id = $2 
+        AND s.block_number = $3
+        AND ($4::integer[] IS NULL OR s.id = ANY($4::integer[]))
+    `, [pubAssign.assignment_id, pubAssign.territory_id, pubAssign.block_number, pubAssign.street_ids]);
 
     const { total_houses, visited_houses } = percentageRes.rows[0];
     const total = Number(total_houses);
@@ -1133,6 +1144,25 @@ router.post('/publisher-assignments/:pubAssignId/return', authenticateToken, asy
     res.status(500).json({ error: 'Erro ao devolver quadra' });
   } finally {
     client.release();
+  }
+});
+
+// Update street observations (Admin only)
+router.put('/streets/:streetId/observations', authenticateToken, requireAdmin, async (req, res) => {
+  const { streetId } = req.params;
+  const { observations } = req.body;
+
+  try {
+    await pool.query(`
+      UPDATE streets
+      SET observations = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+    `, [observations || null, streetId]);
+
+    res.json({ message: 'Observações da rua atualizadas com sucesso', observations });
+  } catch (error) {
+    console.error('Update street observations error:', error);
+    res.status(500).json({ error: 'Erro ao atualizar observações da rua' });
   }
 });
 
@@ -1175,7 +1205,7 @@ router.post('/:id/blocks/:blockNumber/toggle', authenticateToken, requireAdmin, 
       SELECT h.id 
       FROM houses h
       JOIN streets s ON s.id = h.street_id
-      WHERE s.territory_id = $1 AND s.block_number = $2
+      WHERE s.territory_id = $1 AND s.block_number = $2 AND h.dont_visit = FALSE
     `, [assignment.territory_id, blockNum]);
 
     const houseIds = housesRes.rows.map(r => r.id);
@@ -1226,8 +1256,8 @@ router.get('/:id/block-details', authenticateToken, async (req, res) => {
     const statsRes = await pool.query(`
       SELECT 
         s.block_number,
-        COUNT(h.id) as total_houses,
-        COUNT(CASE WHEN hs.visited = TRUE THEN 1 END) as visited_houses
+        COUNT(CASE WHEN h.dont_visit = FALSE THEN 1 END) as total_houses,
+        COUNT(CASE WHEN hs.visited = TRUE AND h.dont_visit = FALSE THEN 1 END) as visited_houses
       FROM streets s
       JOIN houses h ON h.street_id = s.id
       LEFT JOIN house_status hs ON hs.house_id = h.id AND hs.assignment_id = $1
@@ -1235,15 +1265,15 @@ router.get('/:id/block-details', authenticateToken, async (req, res) => {
       GROUP BY s.block_number
     `, [id, assignment.territory_id]);
 
-    // Get active/recent publisher assignment per block
+    // Get active/recent publisher assignments per block (not distinct, since a block can have multiple active assignments)
     const publishersRes = await pool.query(`
-      SELECT DISTINCT ON (block_number) 
-             pa.id as publisher_assignment_id, pa.block_number, pa.publisher_id, pa.status, pa.assigned_date, pa.due_date, pa.returned_at,
+      SELECT pa.id as publisher_assignment_id, pa.block_number, pa.publisher_id, pa.status, pa.assigned_date, pa.due_date, pa.returned_at,
+             pa.street_ids,
              u.name as publisher_name
       FROM publisher_assignments pa
       JOIN users u ON u.id = pa.publisher_id
       WHERE pa.assignment_id = $1
-      ORDER BY block_number, pa.assigned_date DESC
+      ORDER BY pa.assigned_date DESC
     `, [id]);
 
     // Build details dictionary
@@ -1254,6 +1284,7 @@ router.get('/:id/block-details', authenticateToken, async (req, res) => {
         total_houses: 0,
         visited_houses: 0,
         percentage: 0,
+        publisher_assignments: [],
         publisher_assignment: null
       };
     }
@@ -1272,15 +1303,21 @@ router.get('/:id/block-details', authenticateToken, async (req, res) => {
     for (const r of publishersRes.rows) {
       const b = r.block_number;
       if (details[b]) {
-        details[b].publisher_assignment = {
+        details[b].publisher_assignments.push({
           id: r.publisher_assignment_id,
           publisher_id: r.publisher_id,
           publisher_name: r.publisher_name,
           status: r.status,
+          street_ids: r.street_ids || [],
           assigned_date: r.assigned_date,
           due_date: r.due_date,
           returned_at: r.returned_at
-        };
+        });
+        
+        // Backward compatibility (using the first/most recent one)
+        if (!details[b].publisher_assignment) {
+          details[b].publisher_assignment = details[b].publisher_assignments[0];
+        }
       }
     }
 
@@ -1306,8 +1343,8 @@ router.get('/:id/houses', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(`
-      SELECT s.id as street_id, s.name as street_name, s.block_number,
-             h.id as house_id, h.number as house_number,
+      SELECT s.id as street_id, s.name as street_name, s.block_number, s.observations as street_observations,
+             h.id as house_id, h.number as house_number, h.dont_visit,
              COALESCE(hs.visited, FALSE) as visited
       FROM streets s
       JOIN houses h ON h.street_id = s.id
