@@ -1,4 +1,4 @@
-# Territórios
+# Territórios (House to house version)
 
 Territories management platform for congregation workflows, built with React + Vite on the frontend and Node.js + Express + PostgreSQL on the backend. The project covers the full operational flow: login, dashboards, assignments, territory tracking, reports, push notifications, and PWA support.
 
