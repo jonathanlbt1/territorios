@@ -88,7 +88,7 @@ describe('Database Migration', () => {
       expect(usersTableQuery[0]).toContain('name VARCHAR(255) NOT NULL');
       expect(usersTableQuery[0]).toContain('username VARCHAR(100) UNIQUE NOT NULL');
       expect(usersTableQuery[0]).toContain('password VARCHAR(255) NOT NULL');
-      expect(usersTableQuery[0]).toContain("role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'dirigente'))");
+      expect(usersTableQuery[0]).toContain("role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'dirigente', 'publisher'))");
     });
 
     it('should create territories table', async () => {
@@ -231,8 +231,8 @@ describe('Database Migration', () => {
     it('should execute all queries in correct order', async () => {
       await migrate();
 
-      // Total expected queries: 6 tables + 1 indexes + 1 admin lookup + 1 admin seed + 2 column additions = 11
-      expect(mockClient.query).toHaveBeenCalledTimes(11);
+      // Total expected queries: 6 tables + 4 new tables/constraint updates + 1 indexes + 1 admin lookup + 1 admin seed + 2 column additions + others
+      expect(mockClient.query).toHaveBeenCalledTimes(16);
 
       const calls = mockClient.query.mock.calls;
       const adminLookupIndex = calls.findIndex((call) =>
@@ -306,7 +306,7 @@ describe('Database Migration', () => {
         (call) => call[0].includes('CREATE TABLE IF NOT EXISTS users')
       );
       // Check role constraint
-      expect(usersQuery[0]).toContain("CHECK (role IN ('admin', 'dirigente'))");
+      expect(usersQuery[0]).toContain("CHECK (role IN ('admin', 'dirigente', 'publisher'))");
     });
 
     it('should have proper constraints on territories table', async () => {

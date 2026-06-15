@@ -16,6 +16,8 @@ import DirigenteDashboard from './pages/dirigente/Dashboard';
 import DirigentHistory from './pages/dirigente/History';
 import AssignmentDetail from './pages/AssignmentDetail';
 import Layout from './components/Layout';
+import PublisherDashboard from './pages/publisher/Dashboard';
+import PublisherBlockDetail from './pages/publisher/BlockDetail';
 
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();
@@ -82,6 +84,20 @@ function AppRoutes() {
         <Route path="history" element={<DirigentHistory />} />
       </Route>
 
+      {/* Publisher Routes */}
+      <Route
+        path="/publisher"
+        element={
+          <ProtectedRoute allowedRoles={['publisher']}>
+            <Layout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<PublisherDashboard />} />
+        <Route path="assignment/:id" element={<PublisherBlockDetail />} />
+        <Route path="my-user" element={<MyUser />} />
+      </Route>
+
       {/* Shared Routes */}
       <Route
         path="/general-maps"
@@ -110,7 +126,13 @@ function AppRoutes() {
         path="/"
         element={
           user ? (
-            <Navigate to={user.role === 'admin' ? '/admin' : '/dirigente'} replace />
+            user.role === 'admin' ? (
+              <Navigate to="/admin" replace />
+            ) : user.role === 'publisher' ? (
+              <Navigate to="/publisher" replace />
+            ) : (
+              <Navigate to="/dirigente" replace />
+            )
           ) : (
             <Navigate to="/login" replace />
           )

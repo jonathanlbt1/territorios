@@ -4,14 +4,16 @@ Territories management platform for congregation workflows, built with React + V
 
 ## Highlights
 
-- Authentication with role-based access control
+- Authentication with role-based access control (Admin, Dirigente, and Publisher)
 - Territory registration and map management
 - Assignment lifecycle: pending, in progress, returned, completed, and cancelled
-- Administrative dashboards and operational reports
-- S-13 report generation
+- Block assignments to publishers with step-by-step street and house-level visit tracking
+- Administrative dashboards and operational reports (Coverage, Frequency, Partials, and House Activity)
+- S-13 report generation (PDF export)
 - Web Push notifications
 - Responsive UI with light and dark themes
 - PWA-ready client experience
+- Automatic database seeding on startup for territory `ter_01` (Mogi Moderno, 6 blocks, streets, and houses)
 
 ## Screenshots
 
@@ -239,6 +241,7 @@ npm start
 ## Notes
 
 - The server migration creates the schema and inserts a default admin on first run when no admin exists.
+- If Territory 1 does not exist, the server automatically seeds the database with the full `ter_01` (Mogi Moderno) data (6 blocks, streets, and houses) on startup.
 - PostgreSQL date parsing is customized to reduce timezone drift for date-only fields.
 - The app is designed to work well on desktop and mobile, with a mobile bottom navigation and adaptive drawers.
 

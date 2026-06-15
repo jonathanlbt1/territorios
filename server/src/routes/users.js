@@ -37,6 +37,22 @@ router.get('/dirigentes', authenticateToken, async (req, res) => {
   }
 });
 
+// Get all publishers
+router.get('/publishers', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, username, created_at
+      FROM users
+      WHERE role = 'publisher'
+      ORDER BY name
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get publishers error:', error);
+    res.status(500).json({ error: 'Erro ao buscar publicadores' });
+  }
+});
+
 // Get all assignable users (dirigentes + admins) for assignment creation
 router.get('/assignable', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -134,7 +150,7 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Nome e função são obrigatórios' });
     }
 
-    if (!['admin', 'dirigente'].includes(role)) {
+    if (!['admin', 'dirigente', 'publisher'].includes(role)) {
       return res.status(400).json({ error: 'Role inválida' });
     }
 

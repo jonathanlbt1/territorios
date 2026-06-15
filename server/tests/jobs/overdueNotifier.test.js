@@ -316,8 +316,8 @@ describe('Overdue Notifier', () => {
 
       await notifyOverdueAssignments();
 
-      // Only the SELECT query should be called
-      expect(mockClient.query).toHaveBeenCalledTimes(1);
+      // Both the territory overdue SELECT and publisher overdue SELECT queries should be called
+      expect(mockClient.query).toHaveBeenCalledTimes(2);
       expect(mockSendPushToUser).not.toHaveBeenCalled();
     });
   });

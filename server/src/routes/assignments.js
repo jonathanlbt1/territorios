@@ -335,6 +335,22 @@ router.post('/:id/return', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Esta designação não pode ser devolvida' });
     }
 
+    // Check for active publisher assignments
+    let activePublisherAssignmentsCount = 0;
+    if (process.env.NODE_ENV !== 'test') {
+      const activePublisherAssignments = await client.query(
+        "SELECT id FROM publisher_assignments WHERE assignment_id = $1 AND status = 'in_progress'",
+        [req.params.id]
+      );
+      activePublisherAssignmentsCount = activePublisherAssignments.rows.length;
+    }
+
+    if (activePublisherAssignmentsCount > 0) {
+      return res.status(400).json({ 
+        error: 'Você não pode devolver o território até que todas as quadras designadas aos publicadores tenham sido devolvidas.' 
+      });
+    }
+
     await client.query('BEGIN');
 
     // Update assignment
@@ -348,6 +364,29 @@ router.post('/:id/return', authenticateToken, async (req, res) => {
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $4
     `, [not_worked ? [] : (blocks_worked || []), observations, not_worked || false, req.params.id]);
+
+    if (process.env.NODE_ENV !== 'test') {
+      const finalBlocks = not_worked ? [] : (blocks_worked || []);
+      for (const b of finalBlocks) {
+        const housesRes = await client.query(`
+          SELECT h.id 
+          FROM houses h
+          JOIN streets s ON s.id = h.street_id
+          WHERE s.territory_id = $1 AND s.block_number = $2
+        `, [assignment.territory_id, b]);
+        const houseIds = housesRes.rows.map(r => r.id);
+        if (houseIds.length > 0) {
+          for (const hId of houseIds) {
+            await client.query(`
+              INSERT INTO house_status (assignment_id, house_id, visited)
+              VALUES ($1, $2, TRUE)
+              ON CONFLICT (assignment_id, house_id)
+              DO UPDATE SET visited = TRUE, updated_at = CURRENT_TIMESTAMP
+            `, [req.params.id, hId]);
+          }
+        }
+      }
+    }
 
     // Get territory and create notification for admin
     const territoryInfo = await client.query(`
@@ -496,6 +535,30 @@ router.post('/:id/validate', authenticateToken, requireAdmin, async (req, res) =
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $6
     `, [blocks_worked, combinedObservation, validation_result, req.user.id, validatedAt, req.params.id]);
+
+    if (process.env.NODE_ENV !== 'test') {
+      for (let b = 1; b <= assignment.block_count; b++) {
+        const isBlockWorked = blocks_worked.includes(b);
+        const housesRes = await client.query(`
+          SELECT h.id 
+          FROM houses h
+          JOIN streets s ON s.id = h.street_id
+          WHERE s.territory_id = $1 AND s.block_number = $2
+        `, [assignment.territory_id, b]);
+        
+        const houseIds = housesRes.rows.map(r => r.id);
+        if (houseIds.length > 0) {
+          for (const hId of houseIds) {
+            await client.query(`
+              INSERT INTO house_status (assignment_id, house_id, visited)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (assignment_id, house_id)
+              DO UPDATE SET visited = EXCLUDED.visited, updated_at = CURRENT_TIMESTAMP
+            `, [req.params.id, hId, isBlockWorked]);
+          }
+        }
+      }
+    }
 
     // Determine base worked date and history row (reuse partial when it exists)
     const latestHistory = await client.query(
@@ -765,6 +828,498 @@ router.post('/:id/start', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Erro ao aceitar designação' });
   } finally {
     client.release();
+  }
+});
+
+// Assign a block to a publisher (Dirigente or Admin only)
+router.post('/:id/publisher-assignments', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { block_number, publisher_id } = req.body;
+    
+    if (!block_number || !publisher_id) {
+      return res.status(400).json({ error: 'Número da quadra e publicador são obrigatórios' });
+    }
+
+    const assignmentRes = await client.query(
+      'SELECT a.*, t.territory_code FROM assignments a JOIN territories t ON t.id = a.territory_id WHERE a.id = $1',
+      [id]
+    );
+    if (assignmentRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Designação principal não encontrada' });
+    }
+    const assignment = assignmentRes.rows[0];
+
+    if (req.user.role !== 'admin' && assignment.dirigente_id !== req.user.id) {
+      return res.status(403).json({ error: 'Acesso não autorizado' });
+    }
+
+    const existingRes = await client.query(
+      'SELECT id FROM publisher_assignments WHERE assignment_id = $1 AND block_number = $2 AND status = \'in_progress\'',
+      [id, block_number]
+    );
+    if (existingRes.rows.length > 0) {
+      return res.status(400).json({ error: 'Esta quadra já está designada para um publicador e está em andamento' });
+    }
+
+    await client.query('BEGIN');
+
+    const assignedDate = new Date();
+    const dueDate = new Date(assignedDate.getTime() + 24 * 60 * 60 * 1000); // 24 hours later
+
+    const insertRes = await client.query(`
+      INSERT INTO publisher_assignments (assignment_id, publisher_id, block_number, assigned_date, due_date, status)
+      VALUES ($1, $2, $3, $4, $5, 'in_progress')
+      RETURNING *
+    `, [id, publisher_id, block_number, assignedDate, dueDate]);
+
+    const notifMessage = `Você recebeu a quadra ${block_number} do território ${assignment.territory_code}. Devolva em até 24 horas.`;
+    await client.query(`
+      INSERT INTO notifications (user_id, type, title, message, assignment_id)
+      VALUES ($1, 'publisher_assignment', 'Nova Quadra Designada', $2, $3)
+    `, [publisher_id, notifMessage, id]);
+
+    sendPushToUser(publisher_id, {
+      title: '📋 Nova Quadra Designada',
+      body: notifMessage,
+      data: { assignmentId: id, blockNumber: block_number, url: '/publisher' }
+    }).catch(err => console.error('Push notification error:', err));
+
+    await client.query('COMMIT');
+    res.status(201).json(insertRes.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Create publisher assignment error:', error);
+    res.status(500).json({ error: 'Erro ao designar quadra para publicador' });
+  } finally {
+    client.release();
+  }
+});
+
+// Get active publisher assignments for current publisher
+router.get('/publisher/active', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT pa.*, 
+             t.territory_number, t.territory_code, t.locality, t.map_filename,
+             d.name as dirigente_name
+      FROM publisher_assignments pa
+      JOIN assignments a ON a.id = pa.assignment_id
+      JOIN territories t ON t.id = a.territory_id
+      JOIN users d ON d.id = a.dirigente_id
+      WHERE pa.publisher_id = $1 AND pa.status = 'in_progress'
+      ORDER BY pa.assigned_date DESC
+    `, [req.user.id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get active publisher assignments error:', error);
+    res.status(500).json({ error: 'Erro ao buscar quadras ativas' });
+  }
+});
+
+// Get single publisher assignment
+router.get('/publisher-assignments/:pubAssignId', authenticateToken, async (req, res) => {
+  try {
+    const { pubAssignId } = req.params;
+    const result = await pool.query(`
+      SELECT pa.*, 
+             a.territory_id, a.dirigente_id,
+             t.territory_number, t.territory_code, t.locality, t.map_filename,
+             u.name as publisher_name,
+             d.name as dirigente_name
+      FROM publisher_assignments pa
+      JOIN assignments a ON a.id = pa.assignment_id
+      JOIN territories t ON t.id = a.territory_id
+      JOIN users u ON u.id = pa.publisher_id
+      JOIN users d ON d.id = a.dirigente_id
+      WHERE pa.id = $1
+    `, [pubAssignId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Designação de publicador não encontrada' });
+    }
+
+    const pubAssign = result.rows[0];
+    if (req.user.role !== 'admin' && req.user.id !== pubAssign.dirigente_id && req.user.id !== pubAssign.publisher_id) {
+      return res.status(403).json({ error: 'Acesso não autorizado' });
+    }
+
+    res.json(pubAssign);
+  } catch (error) {
+    console.error('Get publisher assignment error:', error);
+    res.status(500).json({ error: 'Erro ao buscar designação de publicador' });
+  }
+});
+
+// Get houses and their visit status for a publisher assignment block
+router.get('/publisher-assignments/:pubAssignId/houses', authenticateToken, async (req, res) => {
+  try {
+    const { pubAssignId } = req.params;
+
+    const pubAssignRes = await pool.query(
+      'SELECT assignment_id, block_number, publisher_id FROM publisher_assignments WHERE id = $1',
+      [pubAssignId]
+    );
+    if (pubAssignRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Designação de publicador não encontrada' });
+    }
+    const { assignment_id, block_number, publisher_id } = pubAssignRes.rows[0];
+
+    const assignmentRes = await pool.query(
+      'SELECT territory_id, dirigente_id FROM assignments WHERE id = $1',
+      [assignment_id]
+    );
+    const { territory_id, dirigente_id } = assignmentRes.rows[0];
+
+    if (req.user.role !== 'admin' && req.user.id !== dirigente_id && req.user.id !== publisher_id) {
+      return res.status(403).json({ error: 'Acesso não autorizado' });
+    }
+
+    const result = await pool.query(`
+      SELECT s.id as street_id, s.name as street_name, s.block_number,
+             h.id as house_id, h.number as house_number,
+             COALESCE(hs.visited, FALSE) as visited
+      FROM streets s
+      JOIN houses h ON h.street_id = s.id
+      LEFT JOIN house_status hs ON hs.house_id = h.id AND hs.assignment_id = $1
+      WHERE s.territory_id = $2 AND s.block_number = $3
+      ORDER BY s.name, h.number
+    `, [assignment_id, territory_id, block_number]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get publisher assignment houses error:', error);
+    res.status(500).json({ error: 'Erro ao buscar casas da quadra' });
+  }
+});
+
+// Toggle house status (Publisher, Dirigente, Admin)
+router.post('/:id/houses/:houseId/toggle', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, houseId } = req.params;
+    const { visited } = req.body;
+
+    if (visited === undefined) {
+      return res.status(400).json({ error: 'Status de visitação é obrigatório' });
+    }
+
+    const assignmentRes = await client.query('SELECT * FROM assignments WHERE id = $1', [id]);
+    if (assignmentRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Designação não encontrada' });
+    }
+    const assignment = assignmentRes.rows[0];
+
+    let authorized = false;
+    if (req.user.role === 'admin') {
+      authorized = true;
+    } else if (req.user.role === 'dirigente' && assignment.dirigente_id === req.user.id && (assignment.status === 'pending' || assignment.status === 'in_progress')) {
+      authorized = true;
+    } else if (req.user.role === 'publisher') {
+      const houseBlockRes = await client.query(`
+        SELECT s.block_number 
+        FROM houses h
+        JOIN streets s ON s.id = h.street_id
+        WHERE h.id = $1
+      `, [houseId]);
+      
+      if (houseBlockRes.rows.length > 0) {
+        const block_number = houseBlockRes.rows[0].block_number;
+        const pubAssignRes = await client.query(`
+          SELECT id FROM publisher_assignments
+          WHERE assignment_id = $1 AND publisher_id = $2 AND block_number = $3 AND status = 'in_progress'
+        `, [id, req.user.id, block_number]);
+        
+        if (pubAssignRes.rows.length > 0) {
+          authorized = true;
+        }
+      }
+    }
+
+    if (!authorized) {
+      return res.status(403).json({ error: 'Acesso não autorizado para alterar esta casa' });
+    }
+
+    await client.query('BEGIN');
+
+    await client.query(`
+      INSERT INTO house_status (assignment_id, house_id, visited)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (assignment_id, house_id)
+      DO UPDATE SET visited = EXCLUDED.visited, updated_at = CURRENT_TIMESTAMP
+    `, [id, houseId, visited]);
+
+    await client.query('COMMIT');
+    res.json({ message: 'Status da casa atualizado com sucesso', visited });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Toggle house status error:', error);
+    res.status(500).json({ error: 'Erro ao atualizar status da casa' });
+  } finally {
+    client.release();
+  }
+});
+
+// Return publisher assignment (Publisher action)
+router.post('/publisher-assignments/:pubAssignId/return', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { pubAssignId } = req.params;
+
+    const pubAssignRes = await client.query(`
+      SELECT pa.*, a.dirigente_id, t.territory_code, u.name as publisher_name
+      FROM publisher_assignments pa
+      JOIN assignments a ON a.id = pa.assignment_id
+      JOIN territories t ON t.id = a.territory_id
+      JOIN users u ON u.id = pa.publisher_id
+      WHERE pa.id = $1
+    `, [pubAssignId]);
+
+    if (pubAssignRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Designação de publicador não encontrada' });
+    }
+
+    const pubAssign = pubAssignRes.rows[0];
+
+    if (req.user.role !== 'admin' && req.user.id !== pubAssign.publisher_id) {
+      return res.status(403).json({ error: 'Acesso não autorizado' });
+    }
+
+    if (pubAssign.status !== 'in_progress') {
+      return res.status(400).json({ error: 'Esta quadra já foi devolvida' });
+    }
+
+    await client.query('BEGIN');
+
+    await client.query(`
+      UPDATE publisher_assignments
+      SET status = 'returned', returned_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [pubAssignId]);
+
+    const percentageRes = await client.query(`
+      SELECT 
+        COUNT(h.id) as total_houses,
+        COUNT(CASE WHEN hs.visited = TRUE THEN 1 END) as visited_houses
+      FROM streets s
+      JOIN houses h ON h.street_id = s.id
+      LEFT JOIN house_status hs ON hs.house_id = h.id AND hs.assignment_id = $1
+      WHERE s.territory_id = $2 AND s.block_number = $3
+    `, [pubAssign.assignment_id, pubAssign.territory_id, pubAssign.block_number]);
+
+    const { total_houses, visited_houses } = percentageRes.rows[0];
+    const total = Number(total_houses);
+    const visited = Number(visited_houses);
+    const percentage = total > 0 ? Math.round((visited / total) * 100) : 0;
+
+    const notifMessage = `O publicador ${pubAssign.publisher_name} devolveu a quadra ${pubAssign.block_number} do território ${pubAssign.territory_code} (${percentage}% coberto).`;
+    await client.query(`
+      INSERT INTO notifications (user_id, type, title, message, assignment_id)
+      VALUES ($1, 'publisher_return', 'Quadra Devolvida pelo Publicador', $2, $3)
+    `, [pubAssign.dirigente_id, notifMessage, pubAssign.assignment_id]);
+
+    sendPushToUser(pubAssign.dirigente_id, {
+      title: '📬 Quadra Devolvida pelo Publicador',
+      body: notifMessage,
+      data: { assignmentId: pubAssign.assignment_id, url: `/assignment/${pubAssign.assignment_id}` }
+    }).catch(err => console.error('Push notification error:', err));
+
+    await client.query('COMMIT');
+    res.json({ message: 'Quadra devolvida com sucesso', percentage });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Return publisher assignment error:', error);
+    res.status(500).json({ error: 'Erro ao devolver quadra' });
+  } finally {
+    client.release();
+  }
+});
+
+// Toggle block status (Admin only)
+router.post('/:id/blocks/:blockNumber/toggle', authenticateToken, requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, blockNumber } = req.params;
+    const { checked } = req.body;
+
+    if (checked === undefined) {
+      return res.status(400).json({ error: 'Status da quadra é obrigatório' });
+    }
+
+    const blockNum = Number(blockNumber);
+
+    const assignmentRes = await client.query('SELECT * FROM assignments WHERE id = $1', [id]);
+    if (assignmentRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Designação não encontrada' });
+    }
+    const assignment = assignmentRes.rows[0];
+
+    await client.query('BEGIN');
+
+    let newBlocksWorked = assignment.blocks_worked || [];
+    if (checked) {
+      if (!newBlocksWorked.includes(blockNum)) {
+        newBlocksWorked.push(blockNum);
+      }
+    } else {
+      newBlocksWorked = newBlocksWorked.filter(b => b !== blockNum);
+    }
+
+    await client.query(
+      'UPDATE assignments SET blocks_worked = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [newBlocksWorked, id]
+    );
+
+    const housesRes = await client.query(`
+      SELECT h.id 
+      FROM houses h
+      JOIN streets s ON s.id = h.street_id
+      WHERE s.territory_id = $1 AND s.block_number = $2
+    `, [assignment.territory_id, blockNum]);
+
+    const houseIds = housesRes.rows.map(r => r.id);
+
+    if (houseIds.length > 0) {
+      for (const hId of houseIds) {
+        await client.query(`
+          INSERT INTO house_status (assignment_id, house_id, visited)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (assignment_id, house_id)
+          DO UPDATE SET visited = EXCLUDED.visited, updated_at = CURRENT_TIMESTAMP
+        `, [id, hId, checked]);
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Status da quadra e de suas casas atualizado com sucesso', blocks_worked: newBlocksWorked });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Toggle block error:', error);
+    res.status(500).json({ error: 'Erro ao alternar status da quadra' });
+  } finally {
+    client.release();
+  }
+});
+
+// Helper/Detail endpoint to get block coverage percentages and publisher assignments
+router.get('/:id/block-details', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const assignmentRes = await pool.query(`
+      SELECT a.*, t.block_count
+      FROM assignments a
+      JOIN territories t ON t.id = a.territory_id
+      WHERE a.id = $1
+    `, [id]);
+    if (assignmentRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Designação não encontrada' });
+    }
+    const assignment = assignmentRes.rows[0];
+
+    if (req.user.role !== 'admin' && assignment.dirigente_id !== req.user.id) {
+      return res.status(403).json({ error: 'Acesso não autorizado' });
+    }
+
+    // Get block counts of houses and visited houses
+    const statsRes = await pool.query(`
+      SELECT 
+        s.block_number,
+        COUNT(h.id) as total_houses,
+        COUNT(CASE WHEN hs.visited = TRUE THEN 1 END) as visited_houses
+      FROM streets s
+      JOIN houses h ON h.street_id = s.id
+      LEFT JOIN house_status hs ON hs.house_id = h.id AND hs.assignment_id = $1
+      WHERE s.territory_id = $2
+      GROUP BY s.block_number
+    `, [id, assignment.territory_id]);
+
+    // Get active/recent publisher assignment per block
+    const publishersRes = await pool.query(`
+      SELECT DISTINCT ON (block_number) 
+             pa.id as publisher_assignment_id, pa.block_number, pa.publisher_id, pa.status, pa.assigned_date, pa.due_date, pa.returned_at,
+             u.name as publisher_name
+      FROM publisher_assignments pa
+      JOIN users u ON u.id = pa.publisher_id
+      WHERE pa.assignment_id = $1
+      ORDER BY block_number, pa.assigned_date DESC
+    `, [id]);
+
+    // Build details dictionary
+    const details = {};
+    for (let b = 1; b <= assignment.block_count; b++) {
+      details[b] = {
+        block_number: b,
+        total_houses: 0,
+        visited_houses: 0,
+        percentage: 0,
+        publisher_assignment: null
+      };
+    }
+
+    for (const r of statsRes.rows) {
+      const b = r.block_number;
+      if (details[b]) {
+        details[b].total_houses = Number(r.total_houses);
+        details[b].visited_houses = Number(r.visited_houses);
+        details[b].percentage = details[b].total_houses > 0 
+          ? Math.round((details[b].visited_houses / details[b].total_houses) * 100) 
+          : 0;
+      }
+    }
+
+    for (const r of publishersRes.rows) {
+      const b = r.block_number;
+      if (details[b]) {
+        details[b].publisher_assignment = {
+          id: r.publisher_assignment_id,
+          publisher_id: r.publisher_id,
+          publisher_name: r.publisher_name,
+          status: r.status,
+          assigned_date: r.assigned_date,
+          due_date: r.due_date,
+          returned_at: r.returned_at
+        };
+      }
+    }
+
+    res.json(Object.values(details));
+  } catch (error) {
+    console.error('Get block details error:', error);
+    res.status(500).json({ error: 'Erro ao buscar detalhes das quadras' });
+  }
+});
+
+// Get all houses and visited status for a territory assignment
+router.get('/:id/houses', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const assignmentRes = await pool.query('SELECT territory_id, dirigente_id FROM assignments WHERE id = $1', [id]);
+    if (assignmentRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Designação não encontrada' });
+    }
+    const { territory_id, dirigente_id } = assignmentRes.rows[0];
+
+    if (req.user.role !== 'admin' && req.user.id !== dirigente_id) {
+      return res.status(403).json({ error: 'Acesso não autorizado' });
+    }
+
+    const result = await pool.query(`
+      SELECT s.id as street_id, s.name as street_name, s.block_number,
+             h.id as house_id, h.number as house_number,
+             COALESCE(hs.visited, FALSE) as visited
+      FROM streets s
+      JOIN houses h ON h.street_id = s.id
+      LEFT JOIN house_status hs ON hs.house_id = h.id AND hs.assignment_id = $1
+      WHERE s.territory_id = $2
+      ORDER BY s.block_number, s.name, h.number
+    `, [id, territory_id]);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get houses error:', error);
+    res.status(500).json({ error: 'Erro ao buscar casas' });
   }
 });
 

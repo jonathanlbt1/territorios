@@ -20,7 +20,9 @@ import {
   CheckCircle,
   AlertCircle,
   XCircle,
-  FileText
+  FileText,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { format, parseISO, isPast, addDays, isValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -243,6 +245,23 @@ function AssignmentDetail() {
   const [notWorked, setNotWorked] = useState(false);
   const [discardAssignment, setDiscardAssignment] = useState(false);
 
+  // New states for publisher assignment and street/house management
+  const [blockDetails, rawSetBlockDetails] = useState([]);
+  const [streets, rawSetStreets] = useState([]);
+  const [publishers, rawSetPublishers] = useState([]);
+
+  const setBlockDetails = (val) => rawSetBlockDetails(Array.isArray(val) ? val : []);
+  const setStreets = (val) => rawSetStreets(Array.isArray(val) ? val : []);
+  const setPublishers = (val) => rawSetPublishers(Array.isArray(val) ? val : []);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [selectedBlockForAssign, setSelectedBlockForAssign] = useState(null);
+  const [selectedPublisherId, setSelectedPublisherId] = useState('');
+  const [showManageStreetsModal, setShowManageStreetsModal] = useState(false);
+  const [newStreetName, setNewStreetName] = useState('');
+  const [newStreetBlock, setNewStreetBlock] = useState(1);
+  const [newHouseNumber, setNewHouseNumber] = useState('');
+  const [selectedStreetForHouse, setSelectedStreetForHouse] = useState('');
+
   useEffect(() => {
     fetchAssignment();
   }, [id]);
@@ -250,18 +269,173 @@ function AssignmentDetail() {
   const fetchAssignment = async () => {
     try {
       const response = await api.get(`/assignments/${id}`);
-      console.log('Assignment loaded:', response.data);
       const data = response.data;
       setAssignment(data);
       setBlocksWorked(data.blocks_worked || []);
       setLockedBlocks(data.partial_blocks_worked || []);
       setObservations(data.return_observations || '');
+
+      // Load block details
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+
+      // Load streets/houses
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
     } catch (error) {
       console.error('Fetch assignment error:', error);
       toast.error(error.response?.data?.error || 'Erro ao carregar designação');
       navigate(-1);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleHouse = async (houseId, currentVisited) => {
+    try {
+      const targetVisited = !currentVisited;
+      await api.post(`/assignments/${id}/houses/${houseId}/toggle`, {
+        visited: targetVisited
+      });
+      toast.success(targetVisited ? 'Casa marcada como visitada' : 'Casa marcada como não visitada');
+      
+      // Refresh details
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+    } catch {
+      toast.error('Erro ao alternar status da casa');
+    }
+  };
+
+  const handleToggleBlock = async (blockNum, currentChecked) => {
+    try {
+      const targetChecked = !currentChecked;
+      const res = await api.post(`/assignments/${id}/blocks/${blockNum}/toggle`, {
+        checked: targetChecked
+      });
+      toast.success(targetChecked ? `Quadra ${blockNum} e suas casas marcadas` : `Quadra ${blockNum} e suas casas desmarcadas`);
+      
+      setBlocksWorked(res.data.blocks_worked || []);
+
+      // Refresh details
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+    } catch {
+      toast.error('Erro ao alternar status da quadra');
+    }
+  };
+
+  const openAssignModal = async (blockNum) => {
+    setSelectedBlockForAssign(blockNum);
+    setSelectedPublisherId('');
+    setShowAssignModal(true);
+    try {
+      const res = await api.get('/users/publishers');
+      setPublishers(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAssignPublisher = async (e) => {
+    e.preventDefault();
+    if (!selectedPublisherId) {
+      toast.error('Selecione um publicador');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.post(`/assignments/${id}/publisher-assignments`, {
+        block_number: selectedBlockForAssign,
+        publisher_id: selectedPublisherId
+      });
+      toast.success(`Quadra ${selectedBlockForAssign} designada com sucesso!`);
+      setShowAssignModal(false);
+      
+      // Refresh details
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao designar quadra');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAddStreet = async (e) => {
+    e.preventDefault();
+    if (!newStreetName.trim() || !newStreetBlock) return;
+    try {
+      await api.post(`/territories/${assignment.territory_id}/streets`, {
+        name: newStreetName,
+        block_number: newStreetBlock
+      });
+      toast.success('Rua adicionada com sucesso!');
+      setNewStreetName('');
+      
+      // Refresh streets and block details
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch {
+      toast.error('Erro ao adicionar rua');
+    }
+  };
+
+  const handleDeleteStreet = async (streetId) => {
+    if (!confirm('Deseja realmente excluir esta rua? Todas as casas associadas também serão excluídas.')) return;
+    try {
+      await api.delete(`/territories/streets/${streetId}`);
+      toast.success('Rua excluída com sucesso!');
+      
+      // Refresh streets and block details
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch {
+      toast.error('Erro ao excluir rua');
+    }
+  };
+
+  const handleAddHouse = async (e) => {
+    e.preventDefault();
+    if (!newHouseNumber.trim() || !selectedStreetForHouse) return;
+    try {
+      await api.post(`/territories/streets/${selectedStreetForHouse}/houses`, {
+        number: newHouseNumber
+      });
+      toast.success('Casa adicionada com sucesso!');
+      setNewHouseNumber('');
+      
+      // Refresh streets and block details
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch {
+      toast.error('Erro ao adicionar casa');
+    }
+  };
+
+  const handleDeleteHouse = async (houseId) => {
+    if (!confirm('Deseja realmente excluir esta casa?')) return;
+    try {
+      await api.delete(`/territories/streets/houses/${houseId}`);
+      toast.success('Casa excluída com sucesso!');
+      
+      // Refresh streets and block details
+      const housesRes = await api.get(`/assignments/${id}/houses`);
+      setStreets(housesRes.data);
+      const blockDetailsRes = await api.get(`/assignments/${id}/block-details`);
+      setBlockDetails(blockDetailsRes.data);
+    } catch {
+      toast.error('Erro ao excluir casa');
     }
   };
 
@@ -395,6 +569,9 @@ function AssignmentDetail() {
   const canValidate = isAdmin && assignment.status === 'returned';
   const canCancel = isAdmin && !isMyAssignment && ['pending', 'in_progress'].includes(assignment.status);
   const showOverdueAlert = isOverdue && assignment.status !== 'returned' && assignment.status !== 'completed';
+  const hasActivePublisherAssignments = Array.isArray(blockDetails) && blockDetails.some(
+    block => block.publisher_assignment && block.publisher_assignment.status === 'in_progress'
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -434,6 +611,149 @@ function AssignmentDetail() {
           alt={`Mapa do território ${assignment.territory_code}`}
           className="h-[400px]"
         />
+      </div>
+
+      {/* Quadras e Casas */}
+      <div className="card">
+        <div className="card-header flex justify-between items-center">
+          <h2 className="font-semibold text-slate-800 dark:text-white flex items-center gap-2">
+            <Grid className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+            Quadras e Casas
+          </h2>
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setNewStreetBlock(1);
+                setSelectedStreetForHouse('');
+                setShowManageStreetsModal(true);
+              }}
+              className="btn btn-secondary py-1.5 px-3 text-xs"
+            >
+              Gerenciar Ruas/Casas
+            </button>
+          )}
+        </div>
+        <div className="p-6 space-y-6">
+          {blockDetails.map((block) => {
+            const isBlockWorked = blocksWorked.includes(block.block_number);
+            const pubAssign = block.publisher_assignment;
+            
+            // Get streets and houses in this block
+            const blockHouses = streets.filter(h => h.block_number === block.block_number);
+            
+            // Group houses by street name
+            const groupedHouses = {};
+            for (const h of blockHouses) {
+              if (h.house_id) {
+                if (!groupedHouses[h.street_name]) {
+                  groupedHouses[h.street_name] = [];
+                }
+                groupedHouses[h.street_name].push(h);
+              }
+            }
+
+            return (
+              <div key={block.block_number} className="border border-slate-100 dark:border-slate-700/60 rounded-2xl p-4 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-700/50">
+                  <div className="flex items-center gap-3">
+                    {isAdmin ? (
+                      <label className="flex items-center gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isBlockWorked}
+                          onChange={() => handleToggleBlock(block.block_number, isBlockWorked)}
+                          aria-label={`Marcar quadra ${block.block_number}`}
+                          className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="font-bold text-lg text-slate-800 dark:text-white">
+                          Quadra {block.block_number}
+                        </span>
+                      </label>
+                    ) : (
+                      <span className="font-bold text-lg text-slate-800 dark:text-white">
+                        Quadra {block.block_number}
+                      </span>
+                    )}
+
+                    <span className="bg-indigo-50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 text-xs font-semibold px-2.5 py-0.5 rounded-full">
+                      {block.percentage}% coberto
+                    </span>
+                  </div>
+
+                  {/* Publisher Assignment Info */}
+                  <div className="flex items-center gap-2">
+                    {pubAssign ? (
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2.5 py-0.5 rounded text-xs font-semibold ${
+                          pubAssign.status === 'in_progress'
+                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
+                            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
+                        }`}>
+                          {pubAssign.status === 'in_progress' ? 'Em andamento' : 'Devolvido'} • {pubAssign.publisher_name}
+                        </span>
+                        {(isAdmin || isMyAssignment) && pubAssign.status === 'in_progress' && (
+                          <button
+                            onClick={() => openAssignModal(block.block_number)}
+                            className="text-xs text-slate-500 hover:text-primary-600 underline"
+                          >
+                            Reatribuir
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      (isAdmin || isMyAssignment) && (assignment.status === 'pending' || assignment.status === 'in_progress') && (
+                        <button
+                          onClick={() => openAssignModal(block.block_number)}
+                          className="btn btn-secondary py-1 px-2.5 text-xs font-medium"
+                        >
+                          Designar Publicador
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full bg-slate-100 dark:bg-slate-700/60 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-indigo-600 dark:bg-indigo-500 h-1.5 transition-all duration-300"
+                    style={{ width: `${block.percentage}%` }}
+                  />
+                </div>
+
+                {/* Streets and Houses in this block */}
+                <div className="space-y-3 pt-2">
+                  {Object.keys(groupedHouses).length === 0 ? (
+                    <p className="text-xs text-slate-400">Nenhuma rua ou casa cadastrada para esta quadra.</p>
+                  ) : (
+                    Object.entries(groupedHouses).map(([streetName, streetHouses]) => (
+                      <div key={streetName} className="space-y-1.5">
+                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{streetName}</span>
+                        <div className="flex flex-wrap gap-2">
+                          {streetHouses.map((house) => (
+                            <button
+                              key={house.house_id}
+                              onClick={() => (isAdmin || isMyAssignment) && (assignment.status === 'pending' || assignment.status === 'in_progress') && handleToggleHouse(house.house_id, house.visited)}
+                              disabled={!(isAdmin || isMyAssignment) || !(assignment.status === 'pending' || assignment.status === 'in_progress')}
+                              className={`flex items-center gap-1.5 py-1 px-2.5 rounded-lg border text-xs font-semibold transition-all ${
+                                house.visited
+                                  ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                                  : 'bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${house.visited ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                              Nº {house.house_number}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Details */}
@@ -502,13 +822,28 @@ function AssignmentDetail() {
 
         {/* Return Button */}
         {isMyAssignment && canReturn && (
-          <button
-            onClick={() => setShowReturnModal(true)}
-            className="btn btn-primary w-full py-4"
-          >
-            <Send className="w-5 h-5" />
-            Devolver Território
-          </button>
+          <div className="w-full space-y-2">
+            {hasActivePublisherAssignments && (
+              <p className="text-xs text-amber-700 dark:text-amber-400 font-medium bg-amber-50 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-200 dark:border-amber-900/30 flex items-start gap-2">
+                <span className="text-base select-none">⚠️</span>
+                <span>Existem quadras pendentes com publicadores. Você só poderá devolver este território ao administrador depois que todos os publicadores devolverem as quadras designadas.</span>
+              </p>
+            )}
+            <button
+              onClick={() => {
+                if (hasActivePublisherAssignments) {
+                  toast.error('Você não pode devolver o território até que todas as quadras designadas aos publicadores tenham sido devolvidas.');
+                } else {
+                  setShowReturnModal(true);
+                }
+              }}
+              className="btn btn-primary w-full py-4"
+              disabled={hasActivePublisherAssignments}
+            >
+              <Send className="w-5 h-5" />
+              Devolver Território
+            </button>
+          </div>
         )}
 
         {/* Refuse Button */}
@@ -776,6 +1111,220 @@ function AssignmentDetail() {
               {!submitting && <><XCircle className="w-5 h-5" />Confirmar Recusa</>}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Assign Block to Publisher Modal */}
+      <Modal
+        isOpen={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        title={`Designar Quadra ${selectedBlockForAssign} para Publicador`}
+        size="md"
+      >
+        <form onSubmit={handleAssignPublisher} className="space-y-5">
+          <div>
+            <label htmlFor="select-publisher" className="input-label">Selecionar Publicador</label>
+            <select
+              id="select-publisher"
+              value={selectedPublisherId}
+              onChange={(e) => setSelectedPublisherId(e.target.value)}
+              className="input"
+              required
+            >
+              <option value="">Selecione um publicador...</option>
+              {publishers.map(pub => (
+                <option key={pub.id} value={pub.id}>{pub.name} (@{pub.username})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-xl text-xs text-slate-500">
+            <p><strong>Nota:</strong> O publicador terá um prazo de 24 horas para trabalhar nesta quadra e devolver o cartão. O sistema enviará notificações push para alertá-lo.</p>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowAssignModal(false)}
+              className="btn btn-secondary flex-1"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="btn btn-primary flex-1"
+            >
+              {submitting ? <div className="spinner" /> : 'Designar'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Manage Streets and Houses Modal (Admin only) */}
+      <Modal
+        isOpen={showManageStreetsModal}
+        onClose={() => setShowManageStreetsModal(false)}
+        title="Gerenciar Ruas e Casas"
+        size="lg"
+      >
+        <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-1">
+          {/* Add Street Form */}
+          <form onSubmit={handleAddStreet} className="card p-4 space-y-4">
+            <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300">Adicionar Nova Rua</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <input
+                  type="text"
+                  value={newStreetName}
+                  onChange={(e) => setNewStreetName(e.target.value)}
+                  placeholder="Nome da Rua (Ex: Rua das Flores)"
+                  className="input"
+                  required
+                />
+              </div>
+              <div>
+                <select
+                  value={newStreetBlock}
+                  onChange={(e) => setNewStreetBlock(Number(e.target.value))}
+                  className="input"
+                  required
+                >
+                  {assignment && Array.from({ length: assignment.block_count }, (_, i) => i + 1).map(b => (
+                    <option key={b} value={b}>Quadra {b}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <button type="submit" className="btn btn-primary w-full py-2.5 text-xs font-semibold">
+              <Plus className="w-4 h-4 mr-1" /> Adicionar Rua
+            </button>
+          </form>
+
+          {/* Add House Form */}
+          {(() => {
+            const uniqueStreets = [];
+            const seen = new Set();
+            for (const s of streets) {
+              if (s.street_id && !seen.has(s.street_id)) {
+                seen.add(s.street_id);
+                uniqueStreets.push({ id: s.street_id, name: s.street_name, block: s.block_number });
+              }
+            }
+
+            return uniqueStreets.length > 0 ? (
+              <form onSubmit={handleAddHouse} className="card p-4 space-y-4">
+                <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300">Adicionar Número de Casa</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <select
+                      value={selectedStreetForHouse}
+                      onChange={(e) => setSelectedStreetForHouse(e.target.value)}
+                      className="input"
+                      required
+                    >
+                      <option value="">Selecione a rua...</option>
+                      {uniqueStreets.sort((a,b) => a.block - b.block || a.name.localeCompare(b.name)).map(s => (
+                        <option key={s.id} value={s.id}>Q{s.block} - {s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={newHouseNumber}
+                      onChange={(e) => setNewHouseNumber(e.target.value)}
+                      placeholder="Nº (Ex: 123A)"
+                      className="input"
+                      required
+                    />
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-primary w-full py-2.5 text-xs font-semibold">
+                  <Plus className="w-4 h-4 mr-1" /> Adicionar Casa
+                </button>
+              </form>
+            ) : null;
+          })()}
+
+          {/* Current Streets & Houses List */}
+          <div className="space-y-4">
+            <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300 border-b pb-2">Ruas e Casas Cadastradas</h3>
+            {(() => {
+              const groupedStreets = {};
+              for (const s of streets) {
+                if (s.street_id) {
+                  if (!groupedStreets[s.street_id]) {
+                    groupedStreets[s.street_id] = {
+                      id: s.street_id,
+                      name: s.street_name,
+                      block: s.block_number,
+                      houses: []
+                    };
+                  }
+                  if (s.house_id) {
+                    groupedStreets[s.street_id].houses.push({ id: s.house_id, number: s.house_number });
+                  }
+                }
+              }
+
+              const streetList = Object.values(groupedStreets).sort((a, b) => a.block - b.block || a.name.localeCompare(b.name));
+
+              if (streetList.length === 0) {
+                return <p className="text-xs text-slate-400 text-center py-4">Nenhuma rua cadastrada ainda.</p>;
+              }
+
+              return (
+                <div className="space-y-3">
+                  {streetList.map(street => (
+                    <div key={street.id} className="border border-slate-100 dark:border-slate-700/60 rounded-xl p-3 space-y-2">
+                      <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/20 p-2 rounded-lg">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          Quadra {street.block} - {street.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteStreet(street.id)}
+                          className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 px-1">
+                        {street.houses.length === 0 ? (
+                          <span className="text-xs text-slate-400">Nenhuma casa adicionada.</span>
+                        ) : (
+                          street.houses.map(house => (
+                            <span
+                              key={house.id}
+                              className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700"
+                            >
+                              Nº {house.number}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteHouse(house.id)}
+                                className="text-red-500 hover:text-red-700 ml-1 font-bold text-sm"
+                              >
+                                &times;
+                              </button>
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+        <div className="pt-4 border-t">
+          <button
+            onClick={() => setShowManageStreetsModal(false)}
+            className="btn btn-secondary w-full"
+          >
+            Fechar
+          </button>
         </div>
       </Modal>
     </div>

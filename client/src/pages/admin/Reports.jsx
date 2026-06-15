@@ -40,9 +40,46 @@ function AdminReports() {
     format(new Date(new Date().getFullYear(), 0, 1), 'yyyy-MM-dd')
   );
 
+  // House Activity Report
+  const [selectedTerritoryId, setSelectedTerritoryId] = useState('');
+  const [houseStartDate, setHouseStartDate] = useState(
+    format(new Date(new Date().getFullYear(), 0, 1), 'yyyy-MM-dd')
+  );
+  const [houseEndDate, setHouseEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [houseActivityData, setHouseActivityData] = useState(null);
+  const [fetchingActivity, setFetchingActivity] = useState(false);
+
   useEffect(() => {
     fetchReports();
   }, [startDate, endDate, reportsStartDate]);
+
+  useEffect(() => {
+    if (!selectedTerritoryId) {
+      setHouseActivityData(null);
+      return;
+    }
+
+    const fetchHouseActivity = async () => {
+      setFetchingActivity(true);
+      try {
+        const res = await api.get('/reports/house-activity', {
+          params: {
+            territory_id: selectedTerritoryId,
+            start_date: houseStartDate,
+            end_date: houseEndDate
+          }
+        });
+        setHouseActivityData(res.data);
+      } catch (error) {
+        console.error('Fetch house activity error:', error);
+        toast.error('Erro ao carregar atividade de casas');
+      } finally {
+        setFetchingActivity(false);
+      }
+    };
+
+    fetchHouseActivity();
+  }, [selectedTerritoryId, houseStartDate, houseEndDate, toast]);
 
   const fetchReports = async () => {
     setLoading(true);
@@ -82,6 +119,7 @@ function AdminReports() {
     { id: 'frequency', label: 'Frequência', icon: BarChart2 },
     { id: 'partial', label: 'Parciais', icon: AlertCircle },
     { id: 'period', label: 'Por Período', icon: Calendar },
+    { id: 'houseActivity', label: 'Atividade de Casas', icon: FileText },
     { id: 's13', label: 'Formulário S-13', icon: FileText }
   ];
 
@@ -356,6 +394,160 @@ function AdminReports() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* House Activity Tab */}
+      {activeTab === 'houseActivity' && (
+        <div className="space-y-6 animate-fade-in" data-testid="house-activity-tab">
+          <div className="card p-4">
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <label htmlFor="house-territory-select" className="input-label text-xs">Território</label>
+                <select
+                  id="house-territory-select"
+                  value={selectedTerritoryId}
+                  onChange={(e) => setSelectedTerritoryId(e.target.value)}
+                  className="input text-sm"
+                >
+                  <option value="">Selecionar Território</option>
+                  {[...coverage]
+                    .sort((a, b) => Number.parseInt(a.territory_number, 10) - Number.parseInt(b.territory_number, 10))
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        Território {t.territory_number} - {t.locality}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="house-start-date" className="input-label text-xs">Data Inicial</label>
+                <input
+                  id="house-start-date"
+                  type="date"
+                  value={houseStartDate}
+                  onChange={(e) => setHouseStartDate(e.target.value)}
+                  className="input text-sm"
+                />
+              </div>
+              <div>
+                <label htmlFor="house-end-date" className="input-label text-xs">Data Final</label>
+                <input
+                  id="house-end-date"
+                  type="date"
+                  value={houseEndDate}
+                  onChange={(e) => setHouseEndDate(e.target.value)}
+                  className="input text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          {fetchingActivity ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="spinner" />
+            </div>
+          ) : !selectedTerritoryId ? (
+            <div className="card p-8 text-center text-slate-500 dark:text-slate-400">
+              Selecione um território acima para visualizar a atividade de casas e quadras.
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Summary Header */}
+              {houseActivityData && (
+                <div className="card p-6 bg-slate-50 dark:bg-slate-800/40 border-l-4 border-primary-500">
+                  <h2 className="text-xl font-bold text-slate-800 dark:text-white">
+                    Território {houseActivityData.territory.territory_number} - {houseActivityData.territory.locality}
+                  </h2>
+                  <p className="text-slate-600 dark:text-slate-300 mt-2 text-sm">
+                    Este território foi trabalhado{' '}
+                    <span className="font-semibold text-primary-600 dark:text-primary-400">
+                      {houseActivityData.times_worked} {houseActivityData.times_worked === 1 ? 'vez' : 'vezes'}
+                    </span>{' '}
+                    no período selecionado.
+                  </p>
+                </div>
+              )}
+
+              {/* Grouped houses */}
+              {houseActivityData && houseActivityData.houses && (
+                <div className="space-y-6">
+                  {Object.keys(
+                    houseActivityData.houses.reduce((acc, h) => {
+                      if (!acc[h.block_number]) acc[h.block_number] = {};
+                      if (!acc[h.block_number][h.street_name]) acc[h.block_number][h.street_name] = [];
+                      acc[h.block_number][h.street_name].push(h);
+                      return acc;
+                    }, {})
+                  )
+                    .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
+                    .map((blockNum) => {
+                      const blockData = houseActivityData.houses
+                        .reduce((acc, h) => {
+                          if (!acc[h.block_number]) acc[h.block_number] = {};
+                          if (!acc[h.block_number][h.street_name]) acc[h.block_number][h.street_name] = [];
+                          acc[h.block_number][h.street_name].push(h);
+                          return acc;
+                        }, {})[blockNum];
+
+                      return (
+                        <div key={blockNum} className="card p-5 space-y-4">
+                          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-2">
+                            <h3 className="font-semibold text-slate-800 dark:text-white flex items-center gap-2 text-lg">
+                              <span className="w-6 h-6 rounded bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 flex items-center justify-center text-sm font-bold">
+                                {blockNum}
+                              </span>
+                              Quadra {blockNum}
+                            </h3>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              {Object.values(blockData).flat().length} casas mapeadas
+                            </span>
+                          </div>
+
+                          <div className="space-y-4 divide-y divide-slate-50 dark:divide-slate-700/50">
+                            {Object.keys(blockData)
+                              .sort()
+                              .map((streetName) => (
+                                <div key={streetName} className="pt-3 first:pt-0 space-y-2">
+                                  <h4 className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                                    {streetName}
+                                  </h4>
+                                  <div className="flex flex-wrap gap-2">
+                                    {blockData[streetName].map((h) => {
+                                      const isVisited = h.visit_count > 0;
+                                      return (
+                                        <div
+                                          key={h.house_id}
+                                          className={`px-3 py-1.5 rounded-lg flex items-center gap-2 text-sm font-medium border transition-colors ${
+                                            isVisited
+                                              ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300'
+                                              : 'bg-slate-50/50 dark:bg-slate-800/20 border-slate-200 dark:border-slate-700/50 text-slate-700 dark:text-slate-400'
+                                          }`}
+                                        >
+                                          <span>N.º {h.house_number}</span>
+                                          <span
+                                            className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                                              isVisited
+                                                ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300'
+                                                : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
+                                            }`}
+                                          >
+                                            {h.visit_count} {h.visit_count === 1 ? 'visita' : 'visitas'}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

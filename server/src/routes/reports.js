@@ -467,5 +467,98 @@ router.delete('/territory-history-s13/:id', authenticateToken, requireAdmin, asy
   }
 });
 
+// Get house activity report for a specific territory
+router.get('/house-activity', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { territory_id, start_date, end_date } = req.query;
+
+    if (!territory_id) {
+      return res.status(400).json({ error: 'Território é obrigatório' });
+    }
+
+    // Check if territory exists
+    const terrRes = await pool.query(
+      'SELECT id, territory_number, locality, block_count, map_filename FROM territories WHERE id = $1',
+      [territory_id]
+    );
+    if (terrRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Território não encontrado' });
+    }
+    const territory = terrRes.rows[0];
+
+    // Get number of times worked in the period
+    const historyParams = [territory_id];
+    let historyDateFilter = '';
+    let hParamIndex = 2;
+
+    if (start_date) {
+      historyParams.push(start_date);
+      historyDateFilter += ` AND th.worked_date >= $${hParamIndex}`;
+      hParamIndex++;
+    }
+
+    if (end_date) {
+      historyParams.push(end_date);
+      historyDateFilter += ` AND th.worked_date <= $${hParamIndex}`;
+      hParamIndex++;
+    }
+
+    const timesWorkedRes = await pool.query(`
+      SELECT COUNT(*) as count 
+      FROM territory_history th
+      WHERE th.territory_id = $1
+      ${historyDateFilter}
+    `, historyParams);
+    const timesWorked = parseInt(timesWorkedRes.rows[0]?.count || '0', 10);
+
+    // Get house visit counts in the period
+    const houseParams = [territory_id];
+    let houseDateFilter = '';
+    let hHouseParamIndex = 2;
+
+    if (start_date) {
+      houseParams.push(start_date);
+      houseDateFilter += ` AND a.validated_at >= $${hHouseParamIndex}`;
+      hHouseParamIndex++;
+    }
+
+    if (end_date) {
+      houseParams.push(end_date);
+      houseDateFilter += ` AND a.validated_at <= $${hHouseParamIndex}`;
+      hHouseParamIndex++;
+    }
+
+    const housesRes = await pool.query(`
+      SELECT 
+        h.id as house_id,
+        h.number as house_number,
+        s.id as street_id,
+        s.name as street_name,
+        s.block_number,
+        COALESCE(COUNT(hs.id) FILTER (
+          WHERE hs.visited = true 
+            AND a.status = 'completed'
+            ${houseDateFilter}
+        ), 0) as visit_count
+      FROM houses h
+      JOIN streets s ON h.street_id = s.id
+      LEFT JOIN house_status hs ON hs.house_id = h.id
+      LEFT JOIN assignments a ON hs.assignment_id = a.id
+      WHERE s.territory_id = $1
+      GROUP BY h.id, s.id, s.name, s.block_number
+      ORDER BY s.block_number ASC, s.name ASC, h.number ASC
+    `, houseParams);
+
+    res.json({
+      territory,
+      times_worked: timesWorked,
+      houses: housesRes.rows
+    });
+  } catch (error) {
+    console.error('Get house activity report error:', error);
+    res.status(500).json({ error: 'Erro ao gerar relatório de atividade de casas' });
+  }
+});
+
 export default router;
 

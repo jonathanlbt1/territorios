@@ -34,6 +34,16 @@ function AdminTerritories() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const toast = useToast();
 
+  // Manage streets and houses state
+  const [showManageStreetsModal, setShowManageStreetsModal] = useState(false);
+  const [selectedTerritoryForStreets, setSelectedTerritoryForStreets] = useState(null);
+  const [streets, setStreets] = useState([]);
+  const [newStreetName, setNewStreetName] = useState('');
+  const [newStreetBlock, setNewStreetBlock] = useState(1);
+  const [selectedStreetForHouse, setSelectedStreetForHouse] = useState('');
+  const [newHouseNumber, setNewHouseNumber] = useState('');
+  const [loadingStreets, setLoadingStreets] = useState(false);
+
   // Create form state
   const [createForm, setCreateForm] = useState({
     territory_number: '',
@@ -60,6 +70,82 @@ function AdminTerritories() {
     fetchTerritories();
     fetchPngFiles();
   }, []);
+
+  const fetchStreets = async (territoryId) => {
+    setLoadingStreets(true);
+    try {
+      const response = await api.get(`/territories/${territoryId}/streets`);
+      setStreets(response.data);
+    } catch (error) {
+      console.error('Fetch streets error:', error);
+      toast.error('Erro ao carregar ruas e casas');
+    } finally {
+      setLoadingStreets(false);
+    }
+  };
+
+  const handleOpenManageStreets = (territory) => {
+    setSelectedTerritoryForStreets(territory);
+    setNewStreetName('');
+    setNewStreetBlock(1);
+    setSelectedStreetForHouse('');
+    setNewHouseNumber('');
+    fetchStreets(territory.id);
+    setShowManageStreetsModal(true);
+  };
+
+  const handleAddStreet = async (e) => {
+    e.preventDefault();
+    if (!newStreetName.trim() || !newStreetBlock || !selectedTerritoryForStreets) return;
+    try {
+      await api.post(`/territories/${selectedTerritoryForStreets.id}/streets`, {
+        name: newStreetName,
+        block_number: newStreetBlock
+      });
+      toast.success('Rua adicionada com sucesso!');
+      setNewStreetName('');
+      fetchStreets(selectedTerritoryForStreets.id);
+    } catch (error) {
+      toast.error('Erro ao adicionar rua');
+    }
+  };
+
+  const handleDeleteStreet = async (streetId) => {
+    if (!confirm('Deseja realmente excluir esta rua? Todas as casas associadas também serão excluídas.')) return;
+    try {
+      await api.delete(`/territories/streets/${streetId}`);
+      toast.success('Rua excluída com sucesso!');
+      fetchStreets(selectedTerritoryForStreets.id);
+    } catch (error) {
+      toast.error('Erro ao excluir rua');
+    }
+  };
+
+  const handleAddHouse = async (e) => {
+    e.preventDefault();
+    if (!newHouseNumber.trim() || !selectedStreetForHouse || !selectedTerritoryForStreets) return;
+    try {
+      await api.post(`/territories/streets/${selectedStreetForHouse}/houses`, {
+        number: newHouseNumber
+      });
+      toast.success('Casa adicionada com sucesso!');
+      setNewHouseNumber('');
+      fetchStreets(selectedTerritoryForStreets.id);
+    } catch (error) {
+      toast.error('Erro ao adicionar casa');
+    }
+  };
+
+  const handleDeleteHouse = async (houseId) => {
+    if (!confirm('Deseja realmente excluir esta casa?')) return;
+    try {
+      await api.delete(`/territories/streets/houses/${houseId}`);
+      toast.success('Casa excluída com sucesso!');
+      fetchStreets(selectedTerritoryForStreets.id);
+    } catch (error) {
+      toast.error('Erro ao excluir casa');
+    }
+  };
 
   const fetchTerritories = async () => {
     try {
@@ -154,7 +240,7 @@ function AdminTerritories() {
         formData.append('map_filename', createForm.map_filename);
       }
 
-      await api.post('/territories', formData, {
+      const response = await api.post('/territories', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
@@ -162,6 +248,10 @@ function AdminTerritories() {
       setShowCreateModal(false);
       fetchTerritories();
       fetchPngFiles();
+
+      if (response.data && response.data.id) {
+        handleOpenManageStreets(response.data);
+      }
     } catch (error) {
       console.error('Create territory error:', error);
       toast.error(error.response?.data?.error || 'Erro ao criar território');
@@ -323,28 +413,35 @@ function AdminTerritories() {
                 </div>
               )}
 
-              <div className="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
+              <div className="grid grid-cols-4 gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
                 <button
                   onClick={() => openViewModal(territory)}
-                  className="btn btn-secondary flex-1 text-xs py-2"
+                  className="btn btn-secondary text-xs py-2 flex items-center justify-center gap-1 col-span-2"
                 >
-                  <Eye className="w-4 h-4" />
+                  <Eye className="w-3.5 h-3.5" />
                   Ver
                 </button>
                 <button
                   onClick={() => openEditModal(territory)}
-                  className="btn btn-secondary flex-1 text-xs py-2"
+                  className="btn btn-secondary text-xs py-2 flex items-center justify-center gap-1 col-span-2"
                 >
-                  <Edit2 className="w-4 h-4" />
+                  <Edit2 className="w-3.5 h-3.5" />
                   Editar
                 </button>
                 <button
+                  onClick={() => handleOpenManageStreets(territory)}
+                  className="btn btn-secondary text-xs py-2 flex items-center justify-center gap-1 bg-indigo-50/50 hover:bg-indigo-50 dark:bg-indigo-950/10 dark:hover:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/30 col-span-3"
+                >
+                  <Grid className="w-3.5 h-3.5" />
+                  Ruas/Casas
+                </button>
+                <button
                   onClick={() => openDeleteModal(territory)}
-                  className="btn btn-secondary text-xs py-2 px-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  className="btn btn-secondary text-xs py-2 flex items-center justify-center text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 col-span-1"
                   disabled={territory.is_assigned}
                   title={territory.is_assigned ? 'Não é possível excluir território designado' : 'Excluir território'}
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
@@ -703,6 +800,20 @@ function AdminTerritories() {
             />
           </div>
 
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowEditModal(false);
+                handleOpenManageStreets(selectedTerritory);
+              }}
+              className="btn btn-secondary flex items-center justify-center gap-2 bg-indigo-50/50 hover:bg-indigo-50 dark:bg-indigo-950/10 dark:hover:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/30"
+            >
+              <Grid className="w-4 h-4" />
+              Gerenciar Ruas e Casas deste Território
+            </button>
+          </div>
+
           <div className="flex gap-3 pt-4">
             <button
               type="button"
@@ -764,6 +875,177 @@ function AdminTerritories() {
               )}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Manage Streets and Houses Modal (Admin only) */}
+      <Modal
+        isOpen={showManageStreetsModal}
+        onClose={() => setShowManageStreetsModal(false)}
+        title={selectedTerritoryForStreets ? `Gerenciar Ruas e Casas - Território ${selectedTerritoryForStreets.territory_number}` : 'Gerenciar Ruas e Casas'}
+        size="lg"
+      >
+        <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-1">
+          {/* Add Street Form */}
+          <form onSubmit={handleAddStreet} className="card p-4 space-y-4">
+            <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300">Adicionar Nova Rua</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <input
+                  type="text"
+                  value={newStreetName}
+                  onChange={(e) => setNewStreetName(e.target.value)}
+                  placeholder="Nome da Rua (Ex: Rua das Flores)"
+                  className="input"
+                  required
+                />
+              </div>
+              <div>
+                <select
+                  value={newStreetBlock}
+                  onChange={(e) => setNewStreetBlock(Number(e.target.value))}
+                  className="input"
+                  required
+                >
+                  {selectedTerritoryForStreets && Array.from({ length: selectedTerritoryForStreets.block_count }, (_, i) => i + 1).map(b => (
+                    <option key={b} value={b}>Quadra {b}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <button type="submit" className="btn btn-primary w-full py-2.5 text-xs font-semibold">
+              <Plus className="w-4 h-4 mr-1" /> Adicionar Rua
+            </button>
+          </form>
+
+          {/* Add House Form */}
+          {(() => {
+            const uniqueStreets = [];
+            const seen = new Set();
+            for (const s of streets) {
+              if (s.street_id && !seen.has(s.street_id)) {
+                seen.add(s.street_id);
+                uniqueStreets.push({ id: s.street_id, name: s.street_name, block: s.block_number });
+              }
+            }
+
+            return uniqueStreets.length > 0 ? (
+              <form onSubmit={handleAddHouse} className="card p-4 space-y-4">
+                <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300">Adicionar Número de Casa</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <select
+                      value={selectedStreetForHouse}
+                      onChange={(e) => setSelectedStreetForHouse(e.target.value)}
+                      className="input"
+                      required
+                    >
+                      <option value="">Selecione a rua...</option>
+                      {uniqueStreets.sort((a,b) => a.block - b.block || a.name.localeCompare(b.name)).map(s => (
+                        <option key={s.id} value={s.id}>Q{s.block} - {s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={newHouseNumber}
+                      onChange={(e) => setNewHouseNumber(e.target.value)}
+                      placeholder="Nº (Ex: 123A)"
+                      className="input"
+                      required
+                    />
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-primary w-full py-2.5 text-xs font-semibold">
+                  <Plus className="w-4 h-4 mr-1" /> Adicionar Casa
+                </button>
+              </form>
+            ) : null;
+          })()}
+
+          {/* Current Streets & Houses List */}
+          <div className="space-y-4">
+            <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300 border-b pb-2">Ruas e Casas Cadastradas</h3>
+            {loadingStreets ? (
+              <div className="flex justify-center py-4">
+                <div className="spinner" />
+              </div>
+            ) : (() => {
+              const groupedStreets = {};
+              for (const s of streets) {
+                if (s.street_id) {
+                  if (!groupedStreets[s.street_id]) {
+                    groupedStreets[s.street_id] = {
+                      id: s.street_id,
+                      name: s.street_name,
+                      block: s.block_number,
+                      houses: []
+                    };
+                  }
+                  if (s.house_id) {
+                    groupedStreets[s.street_id].houses.push({ id: s.house_id, number: s.house_number });
+                  }
+                }
+              }
+
+              const streetList = Object.values(groupedStreets).sort((a, b) => a.block - b.block || a.name.localeCompare(b.name));
+
+              if (streetList.length === 0) {
+                return <p className="text-xs text-slate-400 text-center py-4">Nenhuma rua cadastrada ainda.</p>;
+              }
+
+              return (
+                <div className="space-y-3">
+                  {streetList.map(street => (
+                    <div key={street.id} className="border border-slate-100 dark:border-slate-700/60 rounded-xl p-3 space-y-2">
+                      <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/20 p-2 rounded-lg">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          Quadra {street.block} - {street.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteStreet(street.id)}
+                          className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 px-1">
+                        {street.houses.length === 0 ? (
+                          <span className="text-xs text-slate-400">Nenhuma casa adicionada.</span>
+                        ) : (
+                          street.houses.map(house => (
+                            <span
+                              key={house.id}
+                              className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700"
+                            >
+                              Nº {house.number}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteHouse(house.id)}
+                                className="text-red-500 hover:text-red-700 ml-1 font-bold text-sm"
+                              >
+                                &times;
+                              </button>
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+        <div className="pt-4 border-t">
+          <button
+            onClick={() => setShowManageStreetsModal(false)}
+            className="btn btn-secondary w-full"
+          >
+            Fechar
+          </button>
         </div>
       </Modal>
     </div>

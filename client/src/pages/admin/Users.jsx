@@ -240,6 +240,7 @@ function AdminUsers() {
 
   const admins = filteredUsers.filter(u => u.role === 'admin');
   const dirigentes = filteredUsers.filter(u => u.role === 'dirigente');
+  const publishers = filteredUsers.filter(u => u.role === 'publisher');
 
   if (loading) {
     return (
@@ -389,6 +390,34 @@ function AdminUsers() {
         </div>
       </div>
 
+      {/* Publicadores */}
+      <div className="card">
+        <div className="card-header flex items-center gap-2">
+          <User className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+          <h2 className="font-semibold text-slate-800 dark:text-white">Publicadores</h2>
+          <span className="ml-auto text-sm text-slate-500 dark:text-slate-400">{publishers.length}</span>
+        </div>
+        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+          {publishers.length === 0 ? (
+            <div className="p-6 text-center text-slate-500 dark:text-slate-400">
+              Nenhum publicador encontrado
+            </div>
+          ) : (
+            publishers.map(user => (
+              <UserRow
+                key={user.id}
+                user={user}
+                onEdit={() => openEditModal(user)}
+                onDelete={() => handleDelete(user)}
+                onResetPassword={() => openResetPasswordModal(user)}
+                canChangePassword={authUser?.id === user.id}
+                onChangePassword={openChangePasswordModal}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
       {/* Create/Edit Modal */}
       <Modal
         isOpen={showModal}
@@ -443,6 +472,7 @@ function AdminUsers() {
             >
               <option value="dirigente">Dirigente</option>
               <option value="admin">Administrador</option>
+              <option value="publisher">Publicador</option>
             </select>
           </div>
 

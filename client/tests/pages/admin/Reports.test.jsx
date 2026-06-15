@@ -328,6 +328,18 @@ describe('AdminReports', () => {
 
       expect(screen.getByText('Registro de Designação de Território')).toBeInTheDocument();
     });
+
+    it('should switch to Atividade de Casas tab when clicked', async () => {
+      renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Atividade de Casas/ })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /Atividade de Casas/ }));
+
+      expect(screen.getByText('Selecione um território acima para visualizar a atividade de casas e quadras.')).toBeInTheDocument();
+    });
   });
 
   describe('coverage tab', () => {
@@ -1286,6 +1298,60 @@ describe('AdminReports', () => {
       // The date filter input should be present
       const dateInputs = document.querySelectorAll('input[type="date"]');
       expect(dateInputs.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('house activity tab', () => {
+    beforeEach(() => {
+      mockApi.get.mockImplementation((url) => {
+        if (url === '/reports/coverage') {
+          return Promise.resolve({ data: mockCoverageData });
+        }
+        if (url === '/reports/house-activity') {
+          return Promise.resolve({
+            data: {
+              territory: { territory_number: '5', locality: 'Centro' },
+              times_worked: 3,
+              houses: [
+                {
+                  house_id: 101,
+                  house_number: '120',
+                  street_id: 201,
+                  street_name: 'Rua das Flores',
+                  block_number: 1,
+                  visit_count: 2
+                }
+              ]
+            }
+          });
+        }
+        return Promise.resolve({ data: [] });
+      });
+    });
+
+    it('should load house activity report when territory is selected', async () => {
+      renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Atividade de Casas/ })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /Atividade de Casas/ }));
+
+      // Select territory
+      const select = screen.getByLabelText('Território');
+      fireEvent.change(select, { target: { value: '1' } });
+
+      await waitFor(() => {
+        expect(mockApi.get).toHaveBeenCalledWith('/reports/house-activity', expect.any(Object));
+        expect(screen.getByText('Território 5 - Centro')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/Este território foi trabalhado/)).toBeInTheDocument();
+      expect(screen.getByText('Quadra 1')).toBeInTheDocument();
+      expect(screen.getByText('Rua das Flores')).toBeInTheDocument();
+      expect(screen.getByText('N.º 120')).toBeInTheDocument();
+      expect(screen.getByText('2 visitas')).toBeInTheDocument();
     });
   });
 

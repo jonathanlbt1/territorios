@@ -68,7 +68,7 @@ function Login() {
             Territórios
           </h1>
           <p className="text-primary-200 dark:text-slate-400 text-sm">
-            Sistema de Gestão de Territórios da Congregação Jardim Santista
+            Sistema de Gestão de Territórios da Congregação Paraiso Prometido
           </p>
         </div>
 
